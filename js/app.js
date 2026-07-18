@@ -10,7 +10,7 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 function fmtMoney(n) {
-  return (Number(n) || 0).toLocaleString("ar-EG") + " ل.س";
+  return (Number(n) || 0).toLocaleString("ar-EG") + " ج.م";
 }
 function fmtDate(iso) {
   const d = new Date(iso);
@@ -131,7 +131,7 @@ function openBillForm(custId) {
     <button type="button" class="btn btn-outline btn-sm" onclick="addBillRow()">+ إضافة صف</button>
     <div class="bill-total-row">
       <span>المجموع الكلي</span>
-      <span class="num" id="bill-grand-total">0 ل.س</span>
+      <span class="num" id="bill-grand-total">0 ج.م</span>
     </div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="saveBill(${custId})">حفظ الفاتورة</button>
