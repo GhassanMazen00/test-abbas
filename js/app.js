@@ -30,6 +30,9 @@ function totalBills(id) { return billsOf(id).reduce((s, b) => s + b.total, 0); }
 function totalPayments(id) { return paymentsOf(id).reduce((s, p) => s + p.amount, 0); }
 function balanceOf(id) { return totalBills(id) - totalPayments(id); }
 
+const MONTH_NAMES = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
+let lastManagerTab = "clients"; // لتذكّر التبويب عند العودة من صفحة العميل
+
 function toast(msg, danger) {
   const t = $("#toast");
   t.textContent = msg;
@@ -65,6 +68,7 @@ function startApp() {
   $("#current-user").textContent =
     (currentUser.role === "manager" ? "المدير" : "الموظف") + ": " + currentUser.username;
 
+  $("#client-view").classList.add("hidden");
   if (currentUser.role === "manager") {
     $("#employee-view").classList.add("hidden");
     $("#manager-view").classList.remove("hidden");
@@ -431,21 +435,105 @@ function renderStatementTab() {
 }
 
 /* ---------- ملف العميل الكامل ---------- */
-function openClientProfile(custId) {
-  const c = customerById(custId);
-  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const payments = paymentsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const bal = balanceOf(custId);
+/* حساب إحصاءات موسّعة للعميل */
+function clientStats(id) {
+  const bills = billsOf(id);
+  const payments = paymentsOf(id);
+  const tBills = totalBills(id);
+  const tPays = totalPayments(id);
+  const itemsSold = bills.reduce((s, b) => s + b.items.reduce((x, it) => x + it.count, 0), 0);
+  const distinctItems = new Set();
+  bills.forEach((b) => b.items.forEach((it) => distinctItems.add(it.description)));
+  const allDates = [...bills, ...payments].map((r) => new Date(r.date));
+  return {
+    bills, payments,
+    tBills, tPays,
+    balance: tBills - tPays,
+    numBills: bills.length,
+    numPayments: payments.length,
+    itemsSold,
+    distinctItems: distinctItems.size,
+    avgBill: bills.length ? tBills / bills.length : 0,
+    maxBill: bills.reduce((m, b) => Math.max(m, b.total), 0),
+    maxPayment: payments.reduce((m, p) => Math.max(m, p.amount), 0),
+    payRatio: tBills ? Math.round((tPays / tBills) * 100) : 0,
+    firstDate: allDates.length ? new Date(Math.min(...allDates)) : null,
+    lastDate: allDates.length ? new Date(Math.max(...allDates)) : null
+  };
+}
 
+/* الانتقال إلى صفحة العميل (بدل النافذة المنبثقة) */
+function openClientProfile(custId) {
+  const active = document.querySelector(".tab.active");
+  if (active) lastManagerTab = active.dataset.tab;
+  $("#client-content").innerHTML = renderClientProfile(custId);
+  $("#manager-view").classList.add("hidden");
+  $("#client-view").classList.remove("hidden");
+  window.scrollTo(0, 0);
+}
+
+function backToManager() {
+  $("#client-view").classList.add("hidden");
+  $("#manager-view").classList.remove("hidden");
+  renderManager();
+  const tab = document.querySelector(`.tab[data-tab="${lastManagerTab}"]`);
+  if (tab) tab.click();
+  window.scrollTo(0, 0);
+}
+
+/* بناء محتوى صفحة العميل الكاملة */
+function renderClientProfile(custId) {
+  const c = customerById(custId);
+  const s = clientStats(custId);
+  const balCls = s.balance > 0 ? "pos" : "zero";
+  const statusBadge = s.balance > 0
+    ? '<span class="badge badge-danger">مستحق عليه</span>'
+    : '<span class="badge badge-success">مسدَّد بالكامل</span>';
+
+  /* --- كشف الحساب (حركة موحّدة برصيد جارٍ) --- */
+  const entries = [
+    ...s.bills.map((b) => ({
+      date: b.date, type: "bill", ref: "#" + b.id,
+      desc: b.items.map((it) => it.description).join("، ") || "فاتورة",
+      debit: b.total, credit: 0
+    })),
+    ...s.payments.map((p) => ({
+      date: p.date, type: "payment", ref: "#" + p.id,
+      desc: p.note || "دفعة", debit: 0, credit: p.amount
+    }))
+  ].sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  let running = 0;
+  const ledgerRows = entries.length ? entries.map((e) => {
+    running += e.debit - e.credit;
+    const typeBadge = e.type === "bill"
+      ? '<span class="badge badge-danger">فاتورة</span>'
+      : '<span class="badge badge-success">دفعة</span>';
+    return `
+      <tr>
+        <td>${fmtDate(e.date)}</td>
+        <td>${typeBadge}</td>
+        <td>${e.desc}</td>
+        <td class="num">${e.debit ? fmtMoney(e.debit) : "—"}</td>
+        <td class="num">${e.credit ? fmtMoney(e.credit) : "—"}</td>
+        <td class="num">${fmtMoney(running)}</td>
+      </tr>`;
+  }).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد حركات.</td></tr>';
+
+  /* --- الفواتير --- */
+  const bills = s.bills.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
   const billsHtml = bills.length ? bills.map((b) => `
     <tr>
       <td>#${b.id}</td>
       <td>${fmtDateTime(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description} (${it.count.toLocaleString("ar-EG")}×${it.price.toLocaleString("ar-EG")})`).join("<br>")}</td>
+      <td>${b.items.map((it) => `${it.description} (${it.count.toLocaleString("ar-EG")} × ${fmtMoney(it.price)})`).join("<br>")}</td>
+      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
     </tr>`).join("") :
-    '<tr><td colspan="4" class="empty-msg">لا توجد فواتير.</td></tr>';
+    '<tr><td colspan="5" class="empty-msg">لا توجد فواتير.</td></tr>';
 
+  /* --- الدفعات --- */
+  const payments = s.payments.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
   const paymentsHtml = payments.length ? payments.map((p) => `
     <tr>
       <td>#${p.id}</td>
@@ -455,21 +543,84 @@ function openClientProfile(custId) {
     </tr>`).join("") :
     '<tr><td colspan="4" class="empty-msg">لا توجد دفعات.</td></tr>';
 
-  const balCls = bal > 0 ? "pos" : "zero";
+  /* --- أبرز الأصناف --- */
+  const itemMap = {};
+  s.bills.forEach((b) => b.items.forEach((it) => {
+    if (!itemMap[it.description]) itemMap[it.description] = { count: 0, value: 0 };
+    itemMap[it.description].count += it.count;
+    itemMap[it.description].value += it.count * it.price;
+  }));
+  const items = Object.keys(itemMap).map((k) => ({ name: k, ...itemMap[k] }))
+    .sort((a, b) => b.value - a.value);
+  const itemsHtml = items.length ? items.map((it) => `
+    <tr>
+      <td>${it.name}</td>
+      <td class="num">${it.count.toLocaleString("ar-EG")}</td>
+      <td class="num">${fmtMoney(it.value)}</td>
+    </tr>`).join("") :
+    '<tr><td colspan="3" class="empty-msg">لا توجد أصناف.</td></tr>';
 
-  openModal("ملف العميل — " + c.name, `
+  /* --- النشاط الشهري --- */
+  const mMap = {};
+  s.bills.forEach((b) => {
+    const d = new Date(b.date);
+    const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    (mMap[key] = mMap[key] || { bills: 0, count: 0, pays: 0, label: MONTH_NAMES[d.getMonth()] + " " + d.getFullYear() }).bills += b.total;
+    mMap[key].count += 1;
+  });
+  s.payments.forEach((p) => {
+    const d = new Date(p.date);
+    const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    (mMap[key] = mMap[key] || { bills: 0, count: 0, pays: 0, label: MONTH_NAMES[d.getMonth()] + " " + d.getFullYear() }).pays += p.amount;
+  });
+  const mKeys = Object.keys(mMap).sort().reverse();
+  const monthlyHtml = mKeys.length ? mKeys.map((k) => `
+    <tr>
+      <td>${mMap[k].label}</td>
+      <td class="num">${mMap[k].count.toLocaleString("ar-EG")}</td>
+      <td class="num">${fmtMoney(mMap[k].bills)}</td>
+      <td class="num">${fmtMoney(mMap[k].pays)}</td>
+    </tr>`).join("") :
+    '<tr><td colspan="4" class="empty-msg">لا يوجد نشاط.</td></tr>';
+
+  const statCard = (label, value, cls) =>
+    `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ""}">${value}</div></div>`;
+
+  return `
+    <div class="profile-header">
+      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div>
+        <h2 class="profile-name">${c.name}</h2>
+        <div class="profile-meta">رقم العميل: ${c.id.toLocaleString("ar-EG")} &nbsp;•&nbsp; ${statusBadge}</div>
+      </div>
+    </div>
+
     <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">إجمالي الفواتير</div>
-        <div class="stat-value">${fmtMoney(totalBills(custId))}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">إجمالي الدفعات</div>
-        <div class="stat-value">${fmtMoney(totalPayments(custId))}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">الرصيد المستحق</div>
-        <div class="stat-value ${balCls}">${fmtMoney(bal)}</div>
+      ${statCard("إجمالي الفواتير", fmtMoney(s.tBills))}
+      ${statCard("إجمالي الدفعات", fmtMoney(s.tPays))}
+      ${statCard("الرصيد المستحق", fmtMoney(s.balance), balCls)}
+      ${statCard("نسبة السداد", s.payRatio.toLocaleString("ar-EG") + "٪")}
+    </div>
+
+    <div class="stats-grid">
+      ${statCard("عدد الفواتير", s.numBills.toLocaleString("ar-EG"))}
+      ${statCard("عدد الدفعات", s.numPayments.toLocaleString("ar-EG"))}
+      ${statCard("إجمالي الأصناف المباعة", s.itemsSold.toLocaleString("ar-EG"))}
+      ${statCard("أنواع الأصناف", s.distinctItems.toLocaleString("ar-EG"))}
+      ${statCard("متوسط قيمة الفاتورة", fmtMoney(Math.round(s.avgBill)))}
+      ${statCard("أعلى فاتورة", fmtMoney(s.maxBill))}
+      ${statCard("أعلى دفعة", fmtMoney(s.maxPayment))}
+      ${statCard("أول تعامل", s.firstDate ? fmtDate(s.firstDate.toISOString()) : "—")}
+      ${statCard("آخر نشاط", s.lastDate ? fmtDate(s.lastDate.toISOString()) : "—")}
+    </div>
+
+    <div class="profile-section">
+      <h4>كشف الحساب</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>مدين (فاتورة)</th><th>دائن (دفعة)</th><th>الرصيد الجاري</th></tr></thead>
+          <tbody>${ledgerRows}</tbody>
+        </table>
       </div>
     </div>
 
@@ -477,7 +628,7 @@ function openClientProfile(custId) {
       <h4>الفواتير</h4>
       <div class="table-wrap">
         <table class="data">
-          <thead><tr><th>رقم</th><th>التاريخ</th><th>الأصناف</th><th>الإجمالي</th></tr></thead>
+          <thead><tr><th>رقم</th><th>التاريخ</th><th>الأصناف</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
           <tbody>${billsHtml}</tbody>
         </table>
       </div>
@@ -492,7 +643,27 @@ function openClientProfile(custId) {
         </table>
       </div>
     </div>
-  `);
+
+    <div class="profile-section">
+      <h4>أبرز الأصناف</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>الصنف</th><th>إجمالي الكمية</th><th>إجمالي القيمة</th></tr></thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="profile-section">
+      <h4>النشاط الشهري</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>الشهر</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th>إجمالي الدفعات</th></tr></thead>
+          <tbody>${monthlyHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 /* =========================================================
@@ -512,3 +683,6 @@ $("#modal-close").addEventListener("click", closeModal);
 $("#modal-overlay").addEventListener("click", (e) => {
   if (e.target === $("#modal-overlay")) closeModal();
 });
+
+/* زر العودة من صفحة العميل */
+$("#client-back").addEventListener("click", backToManager);
