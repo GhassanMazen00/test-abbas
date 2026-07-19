@@ -57,6 +57,87 @@ function balanceOf(id) { return totalBills(id) - totalPayments(id); }
 
 const MONTH_NAMES = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
 let lastManagerTab = "clients"; // لتذكّر التبويب عند العودة من صفحة العميل
+let profileCustId = null;       // العميل المفتوح ملفه حالياً
+let currentSub = null;          // الصفحة الفرعية الحالية { custId, type }
+
+/* إظهار واجهة واحدة فقط من واجهات التطبيق */
+function showOnlyView(viewId) {
+  ["employee-view", "manager-view", "client-view", "subpage-view"].forEach((v) => {
+    const el = document.getElementById(v);
+    if (el) el.classList.toggle("hidden", v !== viewId);
+  });
+}
+
+/* ---------- تعديل/حذف البيانات (للمدير) ---------- */
+function nextCustomerId() {
+  return DB.customers.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+}
+function deleteBill(id) {
+  confirmDialog("حذف فاتورة", "هل أنت متأكد من حذف هذه الفاتورة؟ لا يمكن التراجع عن العملية.", () => {
+    DB.bills = DB.bills.filter((b) => b.id !== id);
+    saveDB(DB); closeModal(); toast("تم حذف الفاتورة"); refreshSubpage();
+  });
+}
+function deletePayment(id) {
+  confirmDialog("حذف دفعة", "هل أنت متأكد من حذف هذه الدفعة؟ لا يمكن التراجع عن العملية.", () => {
+    DB.payments = DB.payments.filter((p) => p.id !== id);
+    saveDB(DB); closeModal(); toast("تم حذف الدفعة"); refreshSubpage();
+  });
+}
+function deleteCustomer(id) {
+  const c = customerById(id);
+  confirmDialog("حذف العميل", `سيتم حذف العميل «${c.name}» وكل فواتيره ودفعاته. هل أنت متأكد؟`, () => {
+    DB.customers = DB.customers.filter((x) => x.id !== id);
+    DB.bills = DB.bills.filter((b) => b.customerId !== id);
+    DB.payments = DB.payments.filter((p) => p.customerId !== id);
+    saveDB(DB); closeModal(); toast("تم حذف العميل");
+  });
+}
+
+/* نافذة تأكيد عامة */
+function confirmDialog(title, message, onYes) {
+  openModal(title, `
+    <p class="info-line">${message}</p>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="confirm-yes">تأكيد الحذف</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+  $("#confirm-yes").addEventListener("click", onYes);
+}
+
+/* ---------- إدارة العملاء (إضافة/تعديل) ---------- */
+function addCustomerForm() { customerForm(null); }
+function editCustomerForm(id) { customerForm(id); }
+function customerForm(editId) {
+  const editing = editId != null;
+  const c = editing ? customerById(editId) : null;
+  openModal(editing ? "تعديل عميل" : "عميل جديد", `
+    <div class="field">
+      <label>اسم العميل</label>
+      <input type="text" id="cust-name" placeholder="اسم العميل" value="${editing ? c.name : ""}" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="saveCustomer(${editing ? editId : "null"})">حفظ</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+  setTimeout(() => $("#cust-name") && $("#cust-name").focus(), 50);
+}
+function saveCustomer(editId) {
+  const name = $("#cust-name").value.trim();
+  if (!name) { toast("الرجاء إدخال اسم العميل", true); return; }
+  if (editId != null) {
+    const c = customerById(editId);
+    if (c) c.name = name;
+    toast("تم تعديل بيانات العميل");
+  } else {
+    DB.customers.push({ id: nextCustomerId(), name });
+    toast("تمت إضافة العميل");
+  }
+  saveDB(DB);
+  closeModal();
+}
 
 function toast(msg, danger) {
   const t = $("#toast");
@@ -93,14 +174,11 @@ function startApp() {
   $("#current-user").textContent =
     (currentUser.role === "manager" ? "المدير" : "الموظف") + ": " + currentUser.username;
 
-  $("#client-view").classList.add("hidden");
   if (currentUser.role === "manager") {
-    $("#employee-view").classList.add("hidden");
-    $("#manager-view").classList.remove("hidden");
+    showOnlyView("manager-view");
     renderManager();
   } else {
-    $("#manager-view").classList.add("hidden");
-    $("#employee-view").classList.remove("hidden");
+    showOnlyView("employee-view");
     $("#employee-search").value = "";
     $("#employee-results").innerHTML =
       '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
@@ -138,11 +216,16 @@ function doEmployeeSearch() {
   `).join("");
 }
 
-/* ---------- نموذج فاتورة جديدة ---------- */
-function openBillForm(custId) {
+/* ---------- نموذج فاتورة (إضافة/تعديل) ---------- */
+function openBillForm(custId, editId) {
   const cust = customerById(custId);
-  openModal("فاتورة جديدة — " + cust.name, `
-    <p class="info-line">التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)</p>
+  const editing = editId != null;
+  const bill = editing ? DB.bills.find((b) => b.id === editId) : null;
+  const dateLine = editing
+    ? `التاريخ: <b>${fmtDateTime(bill.date)}</b>`
+    : `التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)`;
+  openModal((editing ? "تعديل فاتورة — " : "فاتورة جديدة — ") + cust.name, `
+    <p class="info-line">${dateLine}</p>
     <div class="table-wrap">
       <table class="bill-items">
         <thead>
@@ -163,21 +246,28 @@ function openBillForm(custId) {
       <span class="num" id="bill-grand-total">0 ج.م</span>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-success" onclick="saveBill(${custId})">حفظ الفاتورة</button>
+      <button class="btn btn-success" onclick="saveBill(${custId}, ${editing ? editId : "null"})">${editing ? "حفظ التعديلات" : "حفظ الفاتورة"}</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>
   `);
-  addBillRow();
-  addBillRow();
+  if (editing) {
+    bill.items.forEach((it) => addBillRow(it));
+  } else {
+    addBillRow();
+    addBillRow();
+  }
 }
 
-function addBillRow() {
+function addBillRow(item) {
   const tbody = $("#bill-rows");
   const tr = document.createElement("tr");
+  const desc = item ? item.description : "";
+  const count = item ? item.count : 1;
+  const price = item ? item.price : 0;
   tr.innerHTML = `
-    <td><input type="text" class="it-desc" placeholder="وصف الصنف" /></td>
-    <td><input type="number" class="it-count" min="0" value="1" oninput="recalcBill()" /></td>
-    <td><input type="number" class="it-price" min="0" value="0" oninput="recalcBill()" /></td>
+    <td><input type="text" class="it-desc" placeholder="وصف الصنف" value="${desc.replace(/"/g, "&quot;")}" /></td>
+    <td><input type="number" class="it-count" min="0" value="${count}" oninput="recalcBill()" /></td>
+    <td><input type="number" class="it-price" min="0" value="${price}" oninput="recalcBill()" /></td>
     <td class="line-total">0</td>
     <td><button type="button" class="row-del" onclick="this.closest('tr').remove(); recalcBill()">&times;</button></td>
   `;
@@ -197,7 +287,7 @@ function recalcBill() {
   $("#bill-grand-total").textContent = fmtMoney(grand);
 }
 
-function saveBill(custId) {
+function saveBill(custId, editId) {
   const items = [];
   $$("#bill-rows tr").forEach((tr) => {
     const description = tr.querySelector(".it-desc").value.trim();
@@ -212,6 +302,12 @@ function saveBill(custId) {
     return;
   }
   const total = items.reduce((s, it) => s + it.count * it.price, 0);
+  if (editId != null) {
+    const bill = DB.bills.find((b) => b.id === editId);
+    if (bill) { bill.items = items; bill.total = total; }
+    saveDB(DB); closeModal(); toast("تم تعديل الفاتورة بنجاح"); refreshSubpage();
+    return;
+  }
   DB.seq.bill++;
   DB.bills.push({
     id: DB.seq.bill,
@@ -223,33 +319,45 @@ function saveBill(custId) {
   saveDB(DB);
   closeModal();
   toast("تم حفظ الفاتورة بنجاح");
+  refreshSubpage();
 }
 
-/* ---------- نموذج دفعة جديدة ---------- */
-function openPaymentForm(custId) {
+/* ---------- نموذج دفعة (إضافة/تعديل) ---------- */
+function openPaymentForm(custId, editId) {
   const cust = customerById(custId);
-  openModal("دفعة جديدة — " + cust.name, `
-    <p class="info-line">التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)</p>
+  const editing = editId != null;
+  const pay = editing ? DB.payments.find((p) => p.id === editId) : null;
+  const dateLine = editing
+    ? `التاريخ: <b>${fmtDateTime(pay.date)}</b>`
+    : `التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)`;
+  openModal((editing ? "تعديل دفعة — " : "دفعة جديدة — ") + cust.name, `
+    <p class="info-line">${dateLine}</p>
     <div class="field">
       <label>المبلغ المدفوع</label>
-      <input type="number" id="pay-amount" min="0" placeholder="0" />
+      <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
       <label>ملاحظة</label>
-      <textarea id="pay-note" placeholder="ملاحظة اختيارية..."></textarea>
+      <textarea id="pay-note" placeholder="ملاحظة اختيارية...">${editing ? (pay.note || "") : ""}</textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-success" onclick="savePayment(${custId})">حفظ الدفعة</button>
+      <button class="btn btn-success" onclick="savePayment(${custId}, ${editing ? editId : "null"})">${editing ? "حفظ التعديلات" : "حفظ الدفعة"}</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-function savePayment(custId) {
+function savePayment(custId, editId) {
   const amount = Number($("#pay-amount").value) || 0;
   const note = $("#pay-note").value.trim();
   if (amount <= 0) {
     toast("الرجاء إدخال مبلغ صحيح", true);
+    return;
+  }
+  if (editId != null) {
+    const pay = DB.payments.find((p) => p.id === editId);
+    if (pay) { pay.amount = amount; pay.note = note; }
+    saveDB(DB); closeModal(); toast("تم تعديل الدفعة بنجاح"); refreshSubpage();
     return;
   }
   DB.seq.payment++;
@@ -263,6 +371,7 @@ function savePayment(custId) {
   saveDB(DB);
   closeModal();
   toast("تم حفظ الدفعة بنجاح");
+  refreshSubpage();
 }
 
 /* =========================================================
@@ -298,6 +407,10 @@ function renderClientsTab() {
         <td class="num">${fmtMoney(totalPayments(c.id))}</td>
         <td class="num">${fmtMoney(bal)}</td>
         <td><span class="badge ${cls}">${label}</span></td>
+        <td class="row-actions">
+          <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); editCustomerForm(${c.id})">تعديل</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteCustomer(${c.id})">حذف</button>
+        </td>
       </tr>`;
   }).join("");
 
@@ -320,7 +433,10 @@ function renderClientsTab() {
         <div class="stat-value pos">${fmtMoney(totalOutstanding)}</div>
       </div>
     </div>
-    <p class="info-line">اضغط على أي عميل لعرض ملفه الكامل.</p>
+    <div class="section-head">
+      <p class="info-line" style="margin:0">اضغط على أي عميل لعرض ملفه الكامل.</p>
+      <button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل</button>
+    </div>
     <div class="table-wrap">
       <table class="data">
         <thead>
@@ -330,6 +446,7 @@ function renderClientsTab() {
             <th>إجمالي الدفعات</th>
             <th>الرصيد المستحق</th>
             <th>الحالة</th>
+            <th>إجراءات</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -488,48 +605,125 @@ function clientStats(id) {
 }
 
 /* الانتقال إلى صفحة العميل (بدل النافذة المنبثقة) */
+function renderProfileInto(custId) {
+  profileCustId = custId;
+  currentSub = null;
+  $("#client-content").innerHTML = renderClientProfile(custId);
+}
 function openClientProfile(custId) {
   const active = document.querySelector(".tab.active");
   if (active) lastManagerTab = active.dataset.tab;
-  $("#client-content").innerHTML = renderClientProfile(custId);
-  $("#manager-view").classList.add("hidden");
-  $("#client-view").classList.remove("hidden");
+  renderProfileInto(custId);
+  showOnlyView("client-view");
   window.scrollTo(0, 0);
 }
-
+function backToProfile() {
+  renderProfileInto(profileCustId);
+  showOnlyView("client-view");
+  window.scrollTo(0, 0);
+}
 function backToManager() {
-  $("#client-view").classList.add("hidden");
-  $("#manager-view").classList.remove("hidden");
+  showOnlyView("manager-view");
   renderManager();
   const tab = document.querySelector(`.tab[data-tab="${lastManagerTab}"]`);
   if (tab) tab.click();
   window.scrollTo(0, 0);
 }
 
-/* بناء محتوى صفحة العميل الكاملة */
-function renderClientProfile(custId) {
+/* ---------- الصفحات الفرعية للعميل ---------- */
+function openSubpage(custId, type) {
+  currentSub = { custId, type };
+  $("#subpage-content").innerHTML = subpageHTML(custId, type);
+  showOnlyView("subpage-view");
+  window.scrollTo(0, 0);
+}
+/* إعادة رسم الصفحة الفرعية الحالية بعد تعديل/حذف (بدون تمرير) */
+function refreshSubpage() {
+  if (!currentSub) return;
+  $("#subpage-content").innerHTML = subpageHTML(currentSub.custId, currentSub.type);
+}
+function subpageHTML(custId, type) {
+  if (type === "bills") return renderBillsPage(custId);
+  if (type === "payments") return renderPaymentsPage(custId);
+  if (type === "statement") return renderStatementPage(custId);
+  if (type === "analytics") return renderAnalyticsPage(custId);
+  return "";
+}
+
+function subpageHeader(custId, title) {
   const c = customerById(custId);
-  const s = clientStats(custId);
-  const balCls = s.balance > 0 ? "pos" : "zero";
-  const statusBadge = s.balance > 0
-    ? '<span class="badge badge-danger">مستحق عليه</span>'
-    : '<span class="badge badge-success">مسدَّد بالكامل</span>';
+  return `<h2 class="page-title subpage-title">${title} — <span class="subpage-client">${c.name}</span></h2>`;
+}
 
-  /* --- كشف الحساب (حركة موحّدة برصيد جارٍ) --- */
+/* --- صفحة الفواتير (مع تعديل/حذف) --- */
+function renderBillsPage(custId) {
+  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const rows = bills.length ? bills.map((b) => `
+    <tr>
+      <td>#${b.id}</td>
+      <td>${fmtDateTime(b.date)}</td>
+      <td>${b.items.map((it) => `${it.description} (${it.count.toLocaleString("ar-EG")} × ${fmtMoney(it.price)})`).join("<br>")}</td>
+      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
+      <td class="num">${fmtMoney(b.total)}</td>
+      <td class="row-actions">
+        <button class="btn btn-outline btn-sm" onclick="openBillForm(${custId}, ${b.id})">تعديل</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
+      </td>
+    </tr>`).join("") :
+    '<tr><td colspan="6" class="empty-msg">لا توجد فواتير.</td></tr>';
+  return `
+    ${subpageHeader(custId, "الفواتير")}
+    <div class="section-head">
+      <p class="info-line" style="margin:0">إجمالي الفواتير: <b>${fmtMoney(totalBills(custId))}</b> — العدد: <b>${bills.length.toLocaleString("ar-EG")}</b></p>
+      <button class="btn btn-primary btn-sm" onclick="openBillForm(${custId})">+ إضافة فاتورة</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم</th><th>التاريخ</th><th>الأصناف</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/* --- صفحة الدفعات (مع تعديل/حذف) --- */
+function renderPaymentsPage(custId) {
+  const payments = paymentsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const rows = payments.length ? payments.map((p) => `
+    <tr>
+      <td>#${p.id}</td>
+      <td>${fmtDateTime(p.date)}</td>
+      <td class="num">${fmtMoney(p.amount)}</td>
+      <td>${p.note || "—"}</td>
+      <td class="row-actions">
+        <button class="btn btn-outline btn-sm" onclick="openPaymentForm(${custId}, ${p.id})">تعديل</button>
+        <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">حذف</button>
+      </td>
+    </tr>`).join("") :
+    '<tr><td colspan="5" class="empty-msg">لا توجد دفعات.</td></tr>';
+  return `
+    ${subpageHeader(custId, "الدفعات")}
+    <div class="section-head">
+      <p class="info-line" style="margin:0">إجمالي الدفعات: <b>${fmtMoney(totalPayments(custId))}</b> — العدد: <b>${payments.length.toLocaleString("ar-EG")}</b></p>
+      <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم</th><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th><th>إجراءات</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/* --- صفحة كشف الحساب (رصيد جارٍ) --- */
+function renderStatementPage(custId) {
+  const bills = billsOf(custId);
+  const payments = paymentsOf(custId);
   const entries = [
-    ...s.bills.map((b) => ({
-      date: b.date, type: "bill", ref: "#" + b.id,
-      desc: b.items.map((it) => it.description).join("، ") || "فاتورة",
-      debit: b.total, credit: 0
-    })),
-    ...s.payments.map((p) => ({
-      date: p.date, type: "payment", ref: "#" + p.id,
-      desc: p.note || "دفعة", debit: 0, credit: p.amount
-    }))
+    ...bills.map((b) => ({ date: b.date, type: "bill", desc: b.items.map((it) => it.description).join("، ") || "فاتورة", debit: b.total, credit: 0 })),
+    ...payments.map((p) => ({ date: p.date, type: "payment", desc: p.note || "دفعة", debit: 0, credit: p.amount }))
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
-
   let running = 0;
-  const ledgerRows = entries.length ? entries.map((e) => {
+  const rows = entries.length ? entries.map((e) => {
     running += e.debit - e.credit;
     const typeBadge = e.type === "bill"
       ? '<span class="badge badge-danger">فاتورة</span>'
@@ -544,72 +738,93 @@ function renderClientProfile(custId) {
         <td class="num">${fmtMoney(running)}</td>
       </tr>`;
   }).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد حركات.</td></tr>';
+  const bal = balanceOf(custId);
+  return `
+    ${subpageHeader(custId, "كشف الحساب")}
+    <p class="info-line">الرصيد المستحق الحالي: <b>${fmtMoney(bal)}</b></p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>مدين (فاتورة)</th><th>دائن (دفعة)</th><th>الرصيد الجاري</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
 
-  /* --- الفواتير --- */
-  const bills = s.bills.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const billsHtml = bills.length ? bills.map((b) => `
-    <tr>
-      <td>#${b.id}</td>
-      <td>${fmtDateTime(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description} (${it.count.toLocaleString("ar-EG")} × ${fmtMoney(it.price)})`).join("<br>")}</td>
-      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
-      <td class="num">${fmtMoney(b.total)}</td>
-    </tr>`).join("") :
-    '<tr><td colspan="5" class="empty-msg">لا توجد فواتير.</td></tr>';
-
-  /* --- الدفعات --- */
-  const payments = s.payments.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const paymentsHtml = payments.length ? payments.map((p) => `
-    <tr>
-      <td>#${p.id}</td>
-      <td>${fmtDateTime(p.date)}</td>
-      <td class="num">${fmtMoney(p.amount)}</td>
-      <td>${p.note || "—"}</td>
-    </tr>`).join("") :
-    '<tr><td colspan="4" class="empty-msg">لا توجد دفعات.</td></tr>';
-
-  /* --- أبرز الأصناف --- */
+/* --- صفحة التحليلات (أبرز الأصناف + النشاط الشهري) --- */
+function renderAnalyticsPage(custId) {
+  const bills = billsOf(custId);
+  const payments = paymentsOf(custId);
   const itemMap = {};
-  s.bills.forEach((b) => b.items.forEach((it) => {
+  bills.forEach((b) => b.items.forEach((it) => {
     if (!itemMap[it.description]) itemMap[it.description] = { count: 0, value: 0 };
     itemMap[it.description].count += it.count;
     itemMap[it.description].value += it.count * it.price;
   }));
-  const items = Object.keys(itemMap).map((k) => ({ name: k, ...itemMap[k] }))
-    .sort((a, b) => b.value - a.value);
+  const items = Object.keys(itemMap).map((k) => ({ name: k, ...itemMap[k] })).sort((a, b) => b.value - a.value);
   const itemsHtml = items.length ? items.map((it) => `
-    <tr>
-      <td>${it.name}</td>
-      <td class="num">${it.count.toLocaleString("ar-EG")}</td>
-      <td class="num">${fmtMoney(it.value)}</td>
-    </tr>`).join("") :
+    <tr><td>${it.name}</td><td class="num">${it.count.toLocaleString("ar-EG")}</td><td class="num">${fmtMoney(it.value)}</td></tr>`).join("") :
     '<tr><td colspan="3" class="empty-msg">لا توجد أصناف.</td></tr>';
 
-  /* --- النشاط الشهري --- */
   const mMap = {};
-  s.bills.forEach((b) => {
+  bills.forEach((b) => {
     const d = new Date(b.date);
     const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
     (mMap[key] = mMap[key] || { bills: 0, count: 0, pays: 0, label: MONTH_NAMES[d.getMonth()] + " " + d.getFullYear() }).bills += b.total;
     mMap[key].count += 1;
   });
-  s.payments.forEach((p) => {
+  payments.forEach((p) => {
     const d = new Date(p.date);
     const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
     (mMap[key] = mMap[key] || { bills: 0, count: 0, pays: 0, label: MONTH_NAMES[d.getMonth()] + " " + d.getFullYear() }).pays += p.amount;
   });
   const mKeys = Object.keys(mMap).sort().reverse();
   const monthlyHtml = mKeys.length ? mKeys.map((k) => `
-    <tr>
-      <td>${mMap[k].label}</td>
-      <td class="num">${mMap[k].count.toLocaleString("ar-EG")}</td>
-      <td class="num">${fmtMoney(mMap[k].bills)}</td>
-      <td class="num">${fmtMoney(mMap[k].pays)}</td>
-    </tr>`).join("") :
+    <tr><td>${mMap[k].label}</td><td class="num">${mMap[k].count.toLocaleString("ar-EG")}</td><td class="num">${fmtMoney(mMap[k].bills)}</td><td class="num">${fmtMoney(mMap[k].pays)}</td></tr>`).join("") :
     '<tr><td colspan="4" class="empty-msg">لا يوجد نشاط.</td></tr>';
+
+  return `
+    ${subpageHeader(custId, "التحليلات")}
+    <div class="profile-section">
+      <h4>أبرز الأصناف</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>الصنف</th><th>إجمالي الكمية</th><th>إجمالي القيمة</th></tr></thead>
+          <tbody>${itemsHtml}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="profile-section">
+      <h4>النشاط الشهري</h4>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>الشهر</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th>إجمالي الدفعات</th></tr></thead>
+          <tbody>${monthlyHtml}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/* بناء محتوى صفحة العميل الكاملة */
+function renderClientProfile(custId) {
+  const c = customerById(custId);
+  const s = clientStats(custId);
+  const balCls = s.balance > 0 ? "pos" : "zero";
+  const statusBadge = s.balance > 0
+    ? '<span class="badge badge-danger">مستحق عليه</span>'
+    : '<span class="badge badge-success">مسدَّد بالكامل</span>';
 
   const statCard = (label, value, cls) =>
     `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ""}">${value}</div></div>`;
+
+  const navCard = (type, icon, title, sub) => `
+    <button class="nav-card" onclick="openSubpage(${custId}, '${type}')">
+      <span class="nav-card-icon">${icon}</span>
+      <span class="nav-card-body">
+        <span class="nav-card-title">${title}</span>
+        <span class="nav-card-sub">${sub}</span>
+      </span>
+      <span class="nav-card-arrow">‹</span>
+    </button>`;
 
   return `
     <div class="profile-header">
@@ -639,54 +854,12 @@ function renderClientProfile(custId) {
       ${statCard("آخر نشاط", s.lastDate ? fmtDate(s.lastDate.toISOString()) : "—")}
     </div>
 
-    <div class="profile-section">
-      <h4>كشف الحساب</h4>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>مدين (فاتورة)</th><th>دائن (دفعة)</th><th>الرصيد الجاري</th></tr></thead>
-          <tbody>${ledgerRows}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="profile-section">
-      <h4>الفواتير</h4>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>رقم</th><th>التاريخ</th><th>الأصناف</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
-          <tbody>${billsHtml}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="profile-section">
-      <h4>الدفعات</h4>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>رقم</th><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th></tr></thead>
-          <tbody>${paymentsHtml}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="profile-section">
-      <h4>أبرز الأصناف</h4>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>الصنف</th><th>إجمالي الكمية</th><th>إجمالي القيمة</th></tr></thead>
-          <tbody>${itemsHtml}</tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="profile-section">
-      <h4>النشاط الشهري</h4>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>الشهر</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th>إجمالي الدفعات</th></tr></thead>
-          <tbody>${monthlyHtml}</tbody>
-        </table>
-      </div>
+    <h4 class="nav-cards-title">سجلات العميل</h4>
+    <div class="nav-cards">
+      ${navCard("bills", "🧾", "الفواتير", "عرض وتعديل وحذف — " + s.numBills.toLocaleString("ar-EG") + " فاتورة")}
+      ${navCard("payments", "💵", "الدفعات", "عرض وتعديل وحذف — " + s.numPayments.toLocaleString("ar-EG") + " دفعة")}
+      ${navCard("statement", "📊", "كشف الحساب", "الحركة الكاملة والرصيد الجاري")}
+      ${navCard("analytics", "📈", "التحليلات", "أبرز الأصناف والنشاط الشهري")}
     </div>
   `;
 }
@@ -709,5 +882,6 @@ $("#modal-overlay").addEventListener("click", (e) => {
   if (e.target === $("#modal-overlay")) closeModal();
 });
 
-/* زر العودة من صفحة العميل */
+/* أزرار العودة */
 $("#client-back").addEventListener("click", backToManager);
+$("#subpage-back").addEventListener("click", backToProfile);
