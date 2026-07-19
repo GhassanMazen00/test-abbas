@@ -63,15 +63,26 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+declare
+  uname text := split_part(new.email, '@', 1);
 begin
+  -- اسم مستخدم صالح وغير مكرّر (حتى لا يفشل الإدراج ويمنع إنشاء المستخدم)
+  if uname is null or uname = '' then
+    uname := 'user_' || substr(new.id::text, 1, 8);
+  end if;
+  if exists (select 1 from public.profiles where username = uname) then
+    uname := uname || '_' || substr(new.id::text, 1, 4);
+  end if;
+
   insert into public.profiles (id, username, role)
-  values (
-    new.id,
-    split_part(new.email, '@', 1),
-    coalesce(new.raw_user_meta_data ->> 'role', 'employee')
-  )
+  values (new.id, uname, coalesce(new.raw_user_meta_data ->> 'role', 'employee'))
   on conflict (id) do nothing;
+
   return new;
+exception
+  when others then
+    -- لا تُفشل إنشاء مستخدم المصادقة بسبب أي خطأ في إنشاء الملف الشخصي
+    return new;
 end;
 $$;
 
