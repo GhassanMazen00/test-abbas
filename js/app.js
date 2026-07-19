@@ -2,7 +2,10 @@
    منطق التطبيق — واجهة أمامية بالكامل
    ========================================================= */
 
-let DB = initDB();
+/* في وضع الخادم تبدأ الذاكرة فارغة وتُملأ بعد تسجيل الدخول؛ محلياً تُحمّل من المتصفح */
+let DB = (Store.mode === "supabase")
+  ? { customers: [], bills: [], payments: [], seq: { bill: 0, payment: 0 } }
+  : initDB();
 let currentUser = null;
 
 /* ---------- أدوات مساعدة ---------- */
@@ -83,25 +86,30 @@ function hideConfirm() { $("#confirm-overlay").classList.add("hidden"); }
 
 /* ---------- حذف البيانات (بتأكيد) ---------- */
 function deleteBill(id) {
-  confirmDialog("حذف فاتورة", "هل أنت متأكد من حذف هذه الفاتورة؟ لا يمكن التراجع عن العملية.", () => {
-    DB.bills = DB.bills.filter((b) => b.id !== id);
-    saveDB(DB); toast("تم حذف الفاتورة"); refreshSubpage();
+  confirmDialog("حذف فاتورة", "هل أنت متأكد من حذف هذه الفاتورة؟ لا يمكن التراجع عن العملية.", async () => {
+    try { await Store.deleteBill(id); toast("تم حذف الفاتورة"); refreshSubpage(); }
+    catch (e) { toast(errMsg(e, "تعذّر حذف الفاتورة"), true); }
   }, { danger: true, yesLabel: "تأكيد الحذف" });
 }
 function deletePayment(id) {
-  confirmDialog("حذف دفعة", "هل أنت متأكد من حذف هذه الدفعة؟ لا يمكن التراجع عن العملية.", () => {
-    DB.payments = DB.payments.filter((p) => p.id !== id);
-    saveDB(DB); toast("تم حذف الدفعة"); refreshSubpage();
+  confirmDialog("حذف دفعة", "هل أنت متأكد من حذف هذه الدفعة؟ لا يمكن التراجع عن العملية.", async () => {
+    try { await Store.deletePayment(id); toast("تم حذف الدفعة"); refreshSubpage(); }
+    catch (e) { toast(errMsg(e, "تعذّر حذف الدفعة"), true); }
   }, { danger: true, yesLabel: "تأكيد الحذف" });
 }
 function deleteCustomer(id) {
   const c = customerById(id);
-  confirmDialog("حذف العميل", `سيتم حذف العميل «${c.name}» وكل فواتيره ودفعاته. هل أنت متأكد؟`, () => {
-    DB.customers = DB.customers.filter((x) => x.id !== id);
-    DB.bills = DB.bills.filter((b) => b.customerId !== id);
-    DB.payments = DB.payments.filter((p) => p.customerId !== id);
-    saveDB(DB); toast("تم حذف العميل"); renderManager();
+  confirmDialog("حذف العميل", `سيتم حذف العميل «${c.name}» وكل فواتيره ودفعاته. هل أنت متأكد؟`, async () => {
+    try { await Store.deleteCustomer(id); toast("تم حذف العميل"); renderManager(); }
+    catch (e) { toast(errMsg(e, "تعذّر حذف العميل"), true); }
   }, { danger: true, yesLabel: "تأكيد الحذف" });
+}
+
+/* رسالة خطأ مختصرة (مع تلميح لصلاحيات المدير) */
+function errMsg(e, fallback) {
+  const m = (e && (e.message || e.error_description || e.hint)) || "";
+  if (/row-level security|permission|not allowed|policy/i.test(m)) return "لا تملك صلاحية هذه العملية";
+  return fallback || m || "حدث خطأ";
 }
 
 /* ---------- إدارة العملاء (إضافة/تعديل بتأكيد) ---------- */
@@ -135,23 +143,23 @@ function saveCustomer(editId) {
     () => commitCustomer(editing ? editId : null, name)
   );
 }
-function commitCustomer(editId, name) {
-  if (editId != null) {
-    const c = customerById(editId);
-    if (c) c.name = name;
-    saveDB(DB); closeModal(); toast("تم تعديل بيانات العميل");
-    if (currentUser && currentUser.role === "manager") renderManager();
-  } else {
-    const id = nextCustomerId();
-    DB.customers.push({ id, name });
-    saveDB(DB); closeModal(); toast("تمت إضافة العميل");
-    if (currentUser && currentUser.role === "employee") {
-      $("#employee-search").value = name;
-      doEmployeeSearch();
+async function commitCustomer(editId, name) {
+  try {
+    if (editId != null) {
+      await Store.updateCustomer(editId, name);
+      closeModal(); toast("تم تعديل بيانات العميل");
+      if (currentUser && currentUser.role === "manager") renderManager();
     } else {
-      renderManager();
+      await Store.addCustomer(name);
+      closeModal(); toast("تمت إضافة العميل");
+      if (currentUser && currentUser.role === "employee") {
+        $("#employee-search").value = name;
+        doEmployeeSearch();
+      } else {
+        renderManager();
+      }
     }
-  }
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ العميل"), true); }
 }
 
 function toast(msg, danger) {
@@ -162,26 +170,47 @@ function toast(msg, danger) {
 }
 
 /* ---------- تسجيل الدخول ---------- */
-$("#login-form").addEventListener("submit", (e) => {
+$("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const u = $("#username").value.trim();
   const p = $("#password").value;
-  const acc = USERS[u];
-  if (!acc || acc.password !== p) {
-    $("#login-error").textContent = "اسم المستخدم أو كلمة المرور غير صحيحة";
-    return;
-  }
-  currentUser = { username: u, ...acc };
+  const btn = $("#login-form button[type=submit]");
+  if (!u || !p) { $("#login-error").textContent = "الرجاء إدخال اسم المستخدم وكلمة المرور"; return; }
   $("#login-error").textContent = "";
-  $("#login-form").reset();
-  startApp();
+  btn.disabled = true;
+  const label = btn.textContent; btn.textContent = "جارٍ الدخول...";
+  try {
+    const sess = await Store.signIn(u, p);
+    currentUser = { username: sess.username, role: sess.role };
+    await Store.loadAll();
+    $("#login-form").reset();
+    startApp();
+  } catch (err) {
+    $("#login-error").textContent = (err && err.message) ? err.message : "تعذّر تسجيل الدخول";
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
 });
 
-$("#logout-btn").addEventListener("click", () => {
+$("#logout-btn").addEventListener("click", async () => {
+  await Store.signOut();
   currentUser = null;
   $("#app").classList.add("hidden");
   $("#login-screen").classList.remove("hidden");
 });
+
+/* استعادة الجلسة تلقائياً في وضع الخادم (بدون إعادة تسجيل دخول) */
+(async function restoreSession() {
+  if (Store.mode !== "supabase") return;
+  try {
+    const sess = await Store.restoreSession();
+    if (sess) {
+      currentUser = { username: sess.username, role: sess.role };
+      await Store.loadAll();
+      startApp();
+    }
+  } catch (e) { /* تجاهل */ }
+})();
 
 function startApp() {
   $("#login-screen").classList.add("hidden");
@@ -324,25 +353,16 @@ function saveBill(custId, editId) {
     () => commitBill(custId, editing ? editId : null, items, total)
   );
 }
-function commitBill(custId, editId, items, total) {
-  if (editId != null) {
-    const bill = DB.bills.find((b) => b.id === editId);
-    if (bill) { bill.items = items; bill.total = total; }
-    saveDB(DB); closeModal(); toast("تم تعديل الفاتورة بنجاح"); refreshSubpage();
-    return;
-  }
-  DB.seq.bill++;
-  DB.bills.push({
-    id: DB.seq.bill,
-    customerId: custId,
-    date: new Date().toISOString(),
-    items,
-    total
-  });
-  saveDB(DB);
-  closeModal();
-  toast("تم حفظ الفاتورة بنجاح");
-  refreshSubpage();
+async function commitBill(custId, editId, items, total) {
+  try {
+    if (editId != null) {
+      await Store.updateBill(editId, items, total);
+      closeModal(); toast("تم تعديل الفاتورة بنجاح"); refreshSubpage();
+    } else {
+      await Store.addBill(custId, items, total);
+      closeModal(); toast("تم حفظ الفاتورة بنجاح"); refreshSubpage();
+    }
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ الفاتورة"), true); }
 }
 
 /* ---------- نموذج دفعة (إضافة/تعديل) ---------- */
@@ -384,25 +404,16 @@ function savePayment(custId, editId) {
     () => commitPayment(custId, editing ? editId : null, amount, note)
   );
 }
-function commitPayment(custId, editId, amount, note) {
-  if (editId != null) {
-    const pay = DB.payments.find((p) => p.id === editId);
-    if (pay) { pay.amount = amount; pay.note = note; }
-    saveDB(DB); closeModal(); toast("تم تعديل الدفعة بنجاح"); refreshSubpage();
-    return;
-  }
-  DB.seq.payment++;
-  DB.payments.push({
-    id: DB.seq.payment,
-    customerId: custId,
-    date: new Date().toISOString(),
-    amount,
-    note
-  });
-  saveDB(DB);
-  closeModal();
-  toast("تم حفظ الدفعة بنجاح");
-  refreshSubpage();
+async function commitPayment(custId, editId, amount, note) {
+  try {
+    if (editId != null) {
+      await Store.updatePayment(editId, amount, note);
+      closeModal(); toast("تم تعديل الدفعة بنجاح"); refreshSubpage();
+    } else {
+      await Store.addPayment(custId, amount, note);
+      closeModal(); toast("تم حفظ الدفعة بنجاح"); refreshSubpage();
+    }
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ الدفعة"), true); }
 }
 
 /* =========================================================
