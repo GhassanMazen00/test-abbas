@@ -4,12 +4,23 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>نظام إدارة حسابات العملاء</title>
+  <script>
+    /* ضبط الوضع (فاتح/ليلي) مبكراً لتجنّب وميض الشاشة */
+    (function () {
+      try {
+        var t = localStorage.getItem("app_theme");
+        if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
 
   <!-- ===================== شاشة تسجيل الدخول ===================== -->
   <section id="login-screen" class="login-screen">
+    <button id="login-theme-toggle" class="theme-toggle login-theme-toggle" aria-label="تبديل الوضع الليلي"></button>
     <div class="login-card">
       <div class="login-logo">حـ</div>
       <h1>نظام إدارة حسابات العملاء</h1>
@@ -42,6 +53,7 @@
       </div>
       <div class="topbar-left">
         <span id="current-user" class="current-user"></span>
+        <button id="theme-toggle" class="theme-toggle" aria-label="تبديل الوضع الليلي"></button>
         <button id="logout-btn" class="btn btn-ghost">تسجيل الخروج</button>
       </div>
     </header>

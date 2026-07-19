@@ -9,6 +9,31 @@ let currentUser = null;
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
+/* ---------- الوضع الليلي ---------- */
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+function applyThemeIcon() {
+  const isDark = currentTheme() === "dark";
+  const icon = isDark ? "☀️" : "🌙";
+  const title = isDark ? "التبديل إلى الوضع الفاتح" : "التبديل إلى الوضع الليلي";
+  ["#theme-toggle", "#login-theme-toggle"].forEach((sel) => {
+    const btn = $(sel);
+    if (btn) { btn.textContent = icon; btn.title = title; }
+  });
+}
+function toggleTheme() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("app_theme", next); } catch (e) {}
+  applyThemeIcon();
+}
+applyThemeIcon();
+["#theme-toggle", "#login-theme-toggle"].forEach((sel) => {
+  const btn = $(sel);
+  if (btn) btn.addEventListener("click", toggleTheme);
+});
+
 function fmtMoney(n) {
   return (Number(n) || 0).toLocaleString("ar-EG") + " ج.م";
 }
