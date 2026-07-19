@@ -1,5 +1,6 @@
 /* ===================== أساسيات ===================== */
 :root {
+  --logo: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20512%20512%22%20fill%3D%22black%22%3E%3Cpath%20d%3D%22M%20466.0%20256.0%20L%20388.2%20419.2%20L%20317.2%20289.9%20L%20320.9%20229.8%20Z%22%2F%3E%3Cpath%20d%3D%22M%20361.0%20437.9%20L%20180.7%20452.1%20L%20257.2%20326.0%20L%20311.2%20299.1%20Z%22%2F%3E%3Cpath%20d%3D%22M%20151.0%20437.9%20L%2048.6%20288.9%20L%20196.0%20292.1%20L%20246.3%20325.3%20Z%22%2F%3E%3Cpath%20d%3D%22M%2046.0%20256.0%20L%20123.8%2092.8%20L%20194.8%20222.1%20L%20191.1%20282.2%20Z%22%2F%3E%3Cpath%20d%3D%22M%20151.0%2074.1%20L%20331.3%2059.9%20L%20254.8%20186.0%20L%20200.8%20212.9%20Z%22%2F%3E%3Cpath%20d%3D%22M%20361.0%2074.1%20L%20463.4%20223.1%20L%20316.0%20219.9%20L%20265.7%20186.7%20Z%22%2F%3E%3C%2Fsvg%3E");
   --primary: #2b2f36;
   --primary-dark: #16181c;
   --primary-soft: #edeef1;
@@ -140,17 +141,18 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: 0 30px 70px rgba(8, 20, 45, .38);
   text-align: center;
 }
-.login-logo {
-  width: 68px; height: 68px;
-  margin: 0 auto 18px;
-  border-radius: 20px;
-  background: linear-gradient(150deg, var(--primary), var(--primary-dark));
-  color: var(--primary-text);
-  font-size: 30px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, .28);
+/* شعار التطبيق (قناع SVG يتلوّن حسب الوضع) */
+.app-logo {
+  display: inline-block;
+  background-color: var(--primary);
+  -webkit-mask: var(--logo) center / contain no-repeat;
+  mask: var(--logo) center / contain no-repeat;
 }
-.login-card h1 { font-size: 21px; margin-bottom: 6px; font-weight: 700; }
+.login-logo {
+  width: 76px; height: 76px;
+  margin: 0 auto 20px;
+}
+.login-card h1 { font-size: 24px; margin-bottom: 6px; font-weight: 700; letter-spacing: .5px; }
 .login-sub { color: var(--muted); margin-bottom: 26px; font-size: 14px; }
 .login-card form { text-align: right; }
 .login-card label {
@@ -199,18 +201,11 @@ button { font-family: inherit; cursor: pointer; }
   box-shadow: var(--shadow-sm);
 }
 .brand {
-  font-size: 18px; font-weight: 700; color: var(--primary);
+  font-size: 19px; font-weight: 700; color: var(--primary);
   display: flex; align-items: center; gap: 10px;
+  letter-spacing: .3px;
 }
-.brand::before {
-  content: "حـ";
-  width: 34px; height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(150deg, var(--primary), var(--primary-dark));
-  color: var(--primary-text); font-size: 17px;
-  display: inline-flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, .22);
-}
+.brand-mark { width: 30px; height: 30px; }
 .topbar-left { display: flex; align-items: center; gap: 14px; }
 .current-user { font-size: 14px; color: var(--muted); font-weight: 600; }
 .topbar .btn-ghost { color: var(--primary); border-color: var(--border); }
