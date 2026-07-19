@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>نظام إدارة حسابات العملاء</title>
+  <title>AZ Accounting</title>
+  <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
   <script>
     /* ضبط الوضع (فاتح/ليلي) مبكراً لتجنّب وميض الشاشة */
     (function () {
@@ -22,8 +23,8 @@
   <section id="login-screen" class="login-screen">
     <button id="login-theme-toggle" class="theme-toggle login-theme-toggle" aria-label="تبديل الوضع الليلي"></button>
     <div class="login-card">
-      <div class="login-logo">حـ</div>
-      <h1>نظام إدارة حسابات العملاء</h1>
+      <div class="login-logo app-logo" role="img" aria-label="AZ Accounting"></div>
+      <h1>AZ Accounting</h1>
       <p class="login-sub">الرجاء تسجيل الدخول للمتابعة</p>
 
       <form id="login-form" autocomplete="off">
@@ -49,7 +50,7 @@
   <div id="app" class="app hidden">
     <header class="topbar">
       <div class="topbar-right">
-        <div class="brand">نظام إدارة حسابات العملاء</div>
+        <div class="brand"><span class="brand-mark app-logo" aria-hidden="true"></span>AZ Accounting</div>
       </div>
       <div class="topbar-left">
         <span id="current-user" class="current-user"></span>
