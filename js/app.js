@@ -68,21 +68,31 @@ function showOnlyView(viewId) {
   });
 }
 
-/* ---------- تعديل/حذف البيانات (للمدير) ---------- */
-function nextCustomerId() {
-  return DB.customers.reduce((m, c) => Math.max(m, c.id), 0) + 1;
+/* ---------- نافذة التأكيد (طبقة مستقلة فوق النماذج) ---------- */
+function confirmDialog(title, message, onYes, opts) {
+  opts = opts || {};
+  $("#confirm-title").textContent = title;
+  $("#confirm-message").textContent = message;
+  const yes = $("#confirm-yes");
+  yes.textContent = opts.yesLabel || "تأكيد";
+  yes.className = "btn " + (opts.danger ? "btn-danger" : "btn-success");
+  yes.onclick = () => { hideConfirm(); onYes(); };
+  $("#confirm-overlay").classList.remove("hidden");
 }
+function hideConfirm() { $("#confirm-overlay").classList.add("hidden"); }
+
+/* ---------- حذف البيانات (بتأكيد) ---------- */
 function deleteBill(id) {
   confirmDialog("حذف فاتورة", "هل أنت متأكد من حذف هذه الفاتورة؟ لا يمكن التراجع عن العملية.", () => {
     DB.bills = DB.bills.filter((b) => b.id !== id);
-    saveDB(DB); closeModal(); toast("تم حذف الفاتورة"); refreshSubpage();
-  });
+    saveDB(DB); toast("تم حذف الفاتورة"); refreshSubpage();
+  }, { danger: true, yesLabel: "تأكيد الحذف" });
 }
 function deletePayment(id) {
   confirmDialog("حذف دفعة", "هل أنت متأكد من حذف هذه الدفعة؟ لا يمكن التراجع عن العملية.", () => {
     DB.payments = DB.payments.filter((p) => p.id !== id);
-    saveDB(DB); closeModal(); toast("تم حذف الدفعة"); refreshSubpage();
-  });
+    saveDB(DB); toast("تم حذف الدفعة"); refreshSubpage();
+  }, { danger: true, yesLabel: "تأكيد الحذف" });
 }
 function deleteCustomer(id) {
   const c = customerById(id);
@@ -90,23 +100,14 @@ function deleteCustomer(id) {
     DB.customers = DB.customers.filter((x) => x.id !== id);
     DB.bills = DB.bills.filter((b) => b.customerId !== id);
     DB.payments = DB.payments.filter((p) => p.customerId !== id);
-    saveDB(DB); closeModal(); toast("تم حذف العميل");
-  });
+    saveDB(DB); toast("تم حذف العميل"); renderManager();
+  }, { danger: true, yesLabel: "تأكيد الحذف" });
 }
 
-/* نافذة تأكيد عامة */
-function confirmDialog(title, message, onYes) {
-  openModal(title, `
-    <p class="info-line">${message}</p>
-    <div class="modal-actions">
-      <button class="btn btn-danger" id="confirm-yes">تأكيد الحذف</button>
-      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
-    </div>
-  `);
-  $("#confirm-yes").addEventListener("click", onYes);
+/* ---------- إدارة العملاء (إضافة/تعديل بتأكيد) ---------- */
+function nextCustomerId() {
+  return DB.customers.reduce((m, c) => Math.max(m, c.id), 0) + 1;
 }
-
-/* ---------- إدارة العملاء (إضافة/تعديل) ---------- */
 function addCustomerForm() { customerForm(null); }
 function editCustomerForm(id) { customerForm(id); }
 function customerForm(editId) {
@@ -115,7 +116,7 @@ function customerForm(editId) {
   openModal(editing ? "تعديل عميل" : "عميل جديد", `
     <div class="field">
       <label>اسم العميل</label>
-      <input type="text" id="cust-name" placeholder="اسم العميل" value="${editing ? c.name : ""}" />
+      <input type="text" id="cust-name" placeholder="اسم العميل" value="${editing ? c.name.replace(/"/g, "&quot;") : ""}" />
     </div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="saveCustomer(${editing ? editId : "null"})">حفظ</button>
@@ -127,16 +128,30 @@ function customerForm(editId) {
 function saveCustomer(editId) {
   const name = $("#cust-name").value.trim();
   if (!name) { toast("الرجاء إدخال اسم العميل", true); return; }
+  const editing = editId != null;
+  confirmDialog(
+    editing ? "تأكيد التعديل" : "تأكيد الإضافة",
+    editing ? `هل تريد حفظ التعديل على اسم العميل إلى «${name}»؟` : `هل تريد إضافة العميل «${name}»؟`,
+    () => commitCustomer(editing ? editId : null, name)
+  );
+}
+function commitCustomer(editId, name) {
   if (editId != null) {
     const c = customerById(editId);
     if (c) c.name = name;
-    toast("تم تعديل بيانات العميل");
+    saveDB(DB); closeModal(); toast("تم تعديل بيانات العميل");
+    if (currentUser && currentUser.role === "manager") renderManager();
   } else {
-    DB.customers.push({ id: nextCustomerId(), name });
-    toast("تمت إضافة العميل");
+    const id = nextCustomerId();
+    DB.customers.push({ id, name });
+    saveDB(DB); closeModal(); toast("تمت إضافة العميل");
+    if (currentUser && currentUser.role === "employee") {
+      $("#employee-search").value = name;
+      doEmployeeSearch();
+    } else {
+      renderManager();
+    }
   }
-  saveDB(DB);
-  closeModal();
 }
 
 function toast(msg, danger) {
@@ -302,6 +317,14 @@ function saveBill(custId, editId) {
     return;
   }
   const total = items.reduce((s, it) => s + it.count * it.price, 0);
+  const editing = editId != null;
+  confirmDialog(
+    editing ? "تأكيد تعديل الفاتورة" : "تأكيد الفاتورة",
+    (editing ? "هل تريد حفظ التعديلات على الفاتورة؟" : "هل تريد إضافة هذه الفاتورة؟") + " الإجمالي: " + fmtMoney(total),
+    () => commitBill(custId, editing ? editId : null, items, total)
+  );
+}
+function commitBill(custId, editId, items, total) {
   if (editId != null) {
     const bill = DB.bills.find((b) => b.id === editId);
     if (bill) { bill.items = items; bill.total = total; }
@@ -354,6 +377,14 @@ function savePayment(custId, editId) {
     toast("الرجاء إدخال مبلغ صحيح", true);
     return;
   }
+  const editing = editId != null;
+  confirmDialog(
+    editing ? "تأكيد تعديل الدفعة" : "تأكيد الدفعة",
+    (editing ? "هل تريد حفظ التعديلات على الدفعة؟" : "هل تريد إضافة هذه الدفعة؟") + " المبلغ: " + fmtMoney(amount),
+    () => commitPayment(custId, editing ? editId : null, amount, note)
+  );
+}
+function commitPayment(custId, editId, amount, note) {
   if (editId != null) {
     const pay = DB.payments.find((p) => p.id === editId);
     if (pay) { pay.amount = amount; pay.note = note; }
@@ -877,10 +908,8 @@ function closeModal() {
   $("#modal-body").innerHTML = "";
   if (currentUser && currentUser.role === "manager") renderManager();
 }
-$("#modal-close").addEventListener("click", closeModal);
-$("#modal-overlay").addEventListener("click", (e) => {
-  if (e.target === $("#modal-overlay")) closeModal();
-});
+/* لا تُغلق النوافذ بالضغط على الخلفية — فقط زر «إلغاء» يغلقها */
+$("#confirm-cancel").addEventListener("click", hideConfirm);
 
 /* أزرار العودة */
 $("#client-back").addEventListener("click", backToManager);
