@@ -732,11 +732,39 @@ function renderMonthlyTab() {
 
 /* ---------- تبويب كشف الحسابات ---------- */
 let statementQuery = "";
+let statementSort = { key: "", dir: -1 }; // dir: -1 تنازلي، 1 تصاعدي
+function stmtVal(c, key) {
+  switch (key) {
+    case "nbills": return billsOf(c.id).length;
+    case "tbills": return totalBills(c.id);
+    case "npays": return paymentsOf(c.id).length;
+    case "tpays": return totalPayments(c.id);
+    case "bal": return balanceOf(c.id);
+    default: return c.name;
+  }
+}
+function sortStatement(key) {
+  if (statementSort.key === key) statementSort.dir = -statementSort.dir;
+  else { statementSort.key = key; statementSort.dir = -1; }
+  renderStatementTab();
+}
+function stmtArrow(key) {
+  if (statementSort.key !== key) return "";
+  return statementSort.dir < 0 ? " ▼" : " ▲";
+}
 function statementRows() {
   let custs = DB.customers;
   if (statementQuery.trim()) {
     const set = new Set(matchCustomers(statementQuery).map((c) => c.id));
     custs = DB.customers.filter((c) => set.has(c.id));
+  }
+  if (statementSort.key) {
+    const k = statementSort.key, dir = statementSort.dir;
+    custs = custs.slice().sort((a, b) => {
+      const va = stmtVal(a, k), vb = stmtVal(b, k);
+      if (typeof va === "string") return va.localeCompare(vb, "ar") * dir;
+      return (va - vb) * dir;
+    });
   }
   if (!custs.length) return '<tr><td colspan="6" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>';
   return custs.map((c) => {
@@ -757,17 +785,17 @@ function renderStatementTab() {
     <div class="search-bar">
       <input type="text" id="statement-search" placeholder="ابحث باسم العميل..." value="${statementQuery.replace(/"/g, "&quot;")}" />
     </div>
-    <p class="info-line">كشف حساب مختصر لكل عميل — اضغط على العميل لعرض التفاصيل الكاملة.</p>
+    <p class="info-line">كشف حساب مختصر لكل عميل — اضغط على العميل لعرض التفاصيل، أو على عنوان العمود للترتيب.</p>
     <div class="table-wrap">
       <table class="data">
         <thead>
           <tr>
             <th>العميل</th>
-            <th>عدد الفواتير</th>
-            <th>إجمالي الفواتير</th>
-            <th>عدد الدفعات</th>
-            <th>إجمالي الدفعات</th>
-            <th>الرصيد المستحق</th>
+            <th class="sortable" onclick="sortStatement('nbills')">عدد الفواتير${stmtArrow("nbills")}</th>
+            <th class="sortable" onclick="sortStatement('tbills')">إجمالي الفواتير${stmtArrow("tbills")}</th>
+            <th class="sortable" onclick="sortStatement('npays')">عدد الدفعات${stmtArrow("npays")}</th>
+            <th class="sortable" onclick="sortStatement('tpays')">إجمالي الدفعات${stmtArrow("tpays")}</th>
+            <th class="sortable" onclick="sortStatement('bal')">الرصيد المستحق${stmtArrow("bal")}</th>
           </tr>
         </thead>
         <tbody id="statement-body">${statementRows()}</tbody>
