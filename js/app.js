@@ -362,6 +362,7 @@ function doEmployeeSearch() {
       <div class="result-actions">
         <button class="btn btn-primary" onclick="openBillForm(${c.id})">إضافة فاتورة</button>
         <button class="btn btn-success" onclick="openPaymentForm(${c.id})">إضافة دفعة</button>
+        <button class="btn btn-warning" onclick="openReturnForm(${c.id})">إضافة مرتجع</button>
       </div>
     </div>
   `).join("");
@@ -378,8 +379,8 @@ function openBillForm(custId, editId) {
   openModal((editing ? "تعديل فاتورة — " : "فاتورة جديدة — ") + cust.name, `
     <p class="info-line">${dateLine}</p>
     <div class="field">
-      <label>رقم الكشف (اختياري)</label>
-      <input type="text" id="bill-docno" placeholder="مثال: 42690" value="${editing ? (bill.docNo || "") : ""}" />
+      <label>رقم الفاتورة / الكشف (إلزامي)</label>
+      <input type="text" id="bill-docno" placeholder="مثال: 42690" value="${editing ? (bill.docNo || "") : ""}" required />
     </div>
     <div class="table-wrap">
       <table class="bill-items">
@@ -458,6 +459,14 @@ function saveBill(custId, editId) {
   }
   const total = items.reduce((s, it) => s + it.count * it.price, 0);
   const docNo = ($("#bill-docno") ? $("#bill-docno").value : "").trim();
+  if (!docNo) {
+    toast("رقم الفاتورة إلزامي — لا يمكن حفظ فاتورة بدون رقم", true);
+    return;
+  }
+  if (total <= 0) {
+    toast("لا يمكن تسجيل فاتورة بقيمة صفر أو بالسالب. للمرتجع استخدم زر «إضافة مرتجع»", true);
+    return;
+  }
   const editing = editId != null;
   confirmDialog(
     editing ? "تأكيد تعديل الفاتورة" : "تأكيد الفاتورة",
@@ -477,22 +486,28 @@ async function commitBill(custId, editId, items, total, docNo) {
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الفاتورة"), true); }
 }
 
-/* ---------- نموذج دفعة (إضافة/تعديل) ---------- */
-function openPaymentForm(custId, editId) {
+/* ---------- نموذج دفعة/مرتجع (إضافة/تعديل) ---------- */
+function openReturnForm(custId, editId) { openPaymentForm(custId, editId, "return"); }
+function openPaymentForm(custId, editId, kind) {
   const cust = customerById(custId);
   const editing = editId != null;
   const pay = editing ? DB.payments.find((p) => p.id === editId) : null;
+  const k = editing ? kindOf(pay) : (kind || "payment");
+  const isReturn = k === "return";
+  const word = isReturn ? "مرتجع" : "دفعة";
+  const amountLabel = isReturn ? "قيمة المرتجع" : "المبلغ المدفوع";
+  const docLabel = isReturn ? "رقم المرتجع (اختياري)" : "رقم الدفعة (اختياري)";
   const dateLine = editing
     ? `التاريخ: <b>${fmtDateTime(pay.date)}</b>`
     : `التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)`;
-  openModal((editing ? "تعديل دفعة — " : "دفعة جديدة — ") + cust.name, `
+  openModal((editing ? ("تعديل " + word + " — ") : (word + " جديد — ")) + cust.name, `
     <p class="info-line">${dateLine}</p>
     <div class="field">
-      <label>المبلغ المدفوع</label>
+      <label>${amountLabel}</label>
       <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
-      <label>رقم الدفعة (اختياري)</label>
+      <label>${docLabel}</label>
       <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? (pay.docNo || "") : ""}" />
     </div>
     <div class="field">
@@ -500,13 +515,16 @@ function openPaymentForm(custId, editId) {
       <textarea id="pay-note" placeholder="ملاحظة اختيارية...">${editing ? (pay.note || "") : ""}</textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-success" onclick="savePayment(${custId}, ${editing ? editId : "null"})">${editing ? "حفظ التعديلات" : "حفظ الدفعة"}</button>
+      <button class="btn btn-success" onclick="savePayment(${custId}, ${editing ? editId : "null"}, '${k}')">${editing ? "حفظ التعديلات" : ("حفظ ال" + word)}</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-function savePayment(custId, editId) {
+function savePayment(custId, editId, kind) {
+  kind = kind || "payment";
+  const isReturn = kind === "return";
+  const word = isReturn ? "المرتجع" : "الدفعة";
   const amount = Number($("#pay-amount").value) || 0;
   const note = $("#pay-note").value.trim();
   const docNo = ($("#pay-docno") ? $("#pay-docno").value : "").trim();
@@ -516,21 +534,23 @@ function savePayment(custId, editId) {
   }
   const editing = editId != null;
   confirmDialog(
-    editing ? "تأكيد تعديل الدفعة" : "تأكيد الدفعة",
-    (editing ? "هل تريد حفظ التعديلات على الدفعة؟" : "هل تريد إضافة هذه الدفعة؟") + " المبلغ: " + fmtMoney(amount),
-    () => commitPayment(custId, editing ? editId : null, amount, note, docNo)
+    editing ? ("تأكيد تعديل " + word) : ("تأكيد " + word),
+    (editing ? ("هل تريد حفظ التعديلات على " + word + "؟") : ("هل تريد إضافة هذا " + (isReturn ? "المرتجع" : "الدفعة") + "؟")) + " المبلغ: " + fmtMoney(amount),
+    () => commitPayment(custId, editing ? editId : null, amount, note, docNo, kind)
   );
 }
-async function commitPayment(custId, editId, amount, note, docNo) {
+async function commitPayment(custId, editId, amount, note, docNo, kind) {
+  kind = kind || "payment";
+  const word = kind === "return" ? "المرتجع" : "الدفعة";
   try {
     if (editId != null) {
       await Store.updatePayment(editId, amount, note, docNo);
-      closeModal(); toast("تم تعديل الدفعة بنجاح"); refreshSubpage();
+      closeModal(); toast("تم تعديل " + word + " بنجاح"); refreshSubpage();
     } else {
-      await Store.addPayment(custId, amount, note, docNo, "payment");
-      closeModal(); toast("تم حفظ الدفعة بنجاح"); refreshSubpage();
+      await Store.addPayment(custId, amount, note, docNo, kind);
+      closeModal(); toast("تم حفظ " + word + " بنجاح"); refreshSubpage();
     }
-  } catch (e) { toast(errMsg(e, "تعذّر حفظ الدفعة"), true); }
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ " + word), true); }
 }
 
 /* =========================================================
@@ -985,7 +1005,10 @@ function renderPaymentsPage(custId) {
     ${subpageHeader(custId, "الدفعات والحركات")}
     <div class="section-head">
       <p class="info-line" style="margin:0">إجمالي الحركات الدائنة: <b>${fmtMoney(totalPayments(custId))}</b> — العدد: <b>${payments.length.toLocaleString("ar-EG")}</b></p>
-      <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
+      <div class="btn-group">
+        <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
+        <button class="btn btn-warning btn-sm" onclick="openReturnForm(${custId})">+ إضافة مرتجع</button>
+      </div>
     </div>
     <div class="table-wrap">
       <table class="data">
