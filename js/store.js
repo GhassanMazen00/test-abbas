@@ -51,19 +51,35 @@ const Store = (function () {
     },
 
     /* ---------- تحميل كل البيانات إلى الذاكرة ---------- */
+    // جلب كل الصفوف على دفعات لتجاوز حد Supabase الأقصى (1000 صف لكل طلب)
+    async fetchAllRows(table) {
+      const pageSize = 1000;
+      let from = 0;
+      let all = [];
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { data, error } = await sb
+          .from(table)
+          .select("*")
+          .order("id")
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        all = all.concat(data);
+        if (!data || data.length < pageSize) break;
+        from += pageSize;
+      }
+      return all;
+    },
     async loadAll() {
       if (!useSupabase) return; // DB محمّل مسبقاً من localStorage
       const [c, b, p] = await Promise.all([
-        sb.from("customers").select("*").order("id"),
-        sb.from("bills").select("*").order("created_at"),
-        sb.from("payments").select("*").order("created_at")
+        this.fetchAllRows("customers"),
+        this.fetchAllRows("bills"),
+        this.fetchAllRows("payments")
       ]);
-      if (c.error) throw c.error;
-      if (b.error) throw b.error;
-      if (p.error) throw p.error;
-      DB.customers = c.data.map(mapCustomer);
-      DB.bills = b.data.map(mapBill);
-      DB.payments = p.data.map(mapPayment);
+      DB.customers = c.map(mapCustomer);
+      DB.bills = b.map(mapBill);
+      DB.payments = p.map(mapPayment);
     },
 
     /* ---------- العملاء ---------- */
