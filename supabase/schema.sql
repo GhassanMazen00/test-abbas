@@ -26,17 +26,25 @@ create table if not exists public.bills (
   customer_id bigint not null references public.customers(id) on delete cascade,
   items       jsonb  not null default '[]'::jsonb,
   total       numeric not null default 0,
+  doc_no      text default '',              -- رقم الكشف
   created_at  timestamptz not null default now()
 );
 
--- الدفعات
+-- الدفعات والحركات الدائنة (kind: payment=دفعة, transfer=ترحيل, discount=خصم, return=مرتجع)
 create table if not exists public.payments (
   id          bigint generated always as identity primary key,
   customer_id bigint not null references public.customers(id) on delete cascade,
   amount      numeric not null default 0,
   note        text default '',
+  doc_no      text default '',              -- رقم الدفعة
+  kind        text not null default 'payment' check (kind in ('payment','transfer','discount','return')),
   created_at  timestamptz not null default now()
 );
+
+-- ترقية قواعد بيانات موجودة (آمنة للتكرار)
+alter table public.bills    add column if not exists doc_no text default '';
+alter table public.payments add column if not exists doc_no text default '';
+alter table public.payments add column if not exists kind   text not null default 'payment';
 
 create index if not exists bills_customer_idx    on public.bills(customer_id);
 create index if not exists payments_customer_idx on public.payments(customer_id);
