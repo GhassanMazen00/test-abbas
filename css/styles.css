@@ -106,6 +106,9 @@ button { font-family: inherit; cursor: pointer; }
 }
 .btn-success:hover { filter: brightness(.96); box-shadow: 0 4px 14px rgba(26, 156, 106, .32); }
 .btn-danger  { background: var(--danger); color: #fff; }
+.btn-warning { background: var(--warning); color: #fff; }
+.btn-warning:hover { filter: brightness(.96); }
+.btn-group { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .btn-ghost {
   background: transparent;
   color: #fff;
