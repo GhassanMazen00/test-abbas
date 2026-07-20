@@ -76,6 +76,100 @@ let lastManagerTab = "clients"; // لتذكّر التبويب عند العود
 let profileCustId = null;       // العميل المفتوح ملفه حالياً
 let currentSub = null;          // الصفحة الفرعية الحالية { custId, type }
 
+/* =========================================================
+   بحث تقريبي بالأسماء (يتحمّل اختلاف حرف أو اثنين ويعيد عدة نتائج)
+   ========================================================= */
+function normSearch(s) {
+  return String(s == null ? "" : s)
+    .replace(/[أإآ]/g, "ا").replace(/ى/g, "ي").replace(/ؤ/g, "و").replace(/ئ/g, "ي")
+    .replace(/ة/g, "ه").replace(/[ًٌٍَُِّْـ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function editDist(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i), cur = new Array(n + 1);
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    const tmp = prev; prev = cur; cur = tmp;
+  }
+  return prev[n];
+}
+/* نتيجة أقل = تطابق أفضل، و-1 = لا يوجد تطابق */
+function nameMatchScore(query, name) {
+  const q = normSearch(query), t = normSearch(name);
+  if (!q) return 0;
+  if (t.includes(q)) return t.indexOf(q); // احتواء مباشر: الأفضل
+  const maxD = q.length < 3 ? 0 : 2;       // اسمح باختلاف حتى حرفين
+  if (maxD === 0) return -1;
+  let best = editDist(q, t);
+  for (const tok of t.split(" ")) {
+    if (!tok) continue;
+    if (tok.includes(q)) { best = Math.min(best, 1); continue; }
+    best = Math.min(best, editDist(q, tok));
+    if (tok.length > q.length) {
+      for (let i = 0; i + q.length <= tok.length; i++) {
+        best = Math.min(best, editDist(q, tok.slice(i, i + q.length)));
+      }
+    }
+  }
+  return best <= maxD ? 100 + best : -1;
+}
+function matchCustomers(query) {
+  const scored = [];
+  for (const c of DB.customers) {
+    const s = nameMatchScore(query, c.name);
+    if (s >= 0) scored.push({ c, s });
+  }
+  scored.sort((a, b) => a.s - b.s || a.c.name.localeCompare(b.c.name, "ar"));
+  return scored.map((x) => x.c);
+}
+
+/* =========================================================
+   نافذة تفاصيل الفواتير (لليوم/الشهر) — أعمدة مختصرة فقط
+   ========================================================= */
+function billRowsCompact(bills) {
+  const sorted = bills.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+  if (!sorted.length) return '<tr><td colspan="4" class="empty-msg">لا توجد فواتير.</td></tr>';
+  return sorted.map((b) => {
+    const cust = customerById(b.customerId);
+    return `<tr>
+      <td class="num">${b.docNo ? b.docNo : ("#" + b.id)}</td>
+      <td>${fmtDate(b.date)}</td>
+      <td>${cust ? cust.name : "—"}</td>
+      <td class="num">${fmtMoney(b.total)}</td>
+    </tr>`;
+  }).join("");
+}
+function showBillsModal(title, bills) {
+  const total = bills.reduce((s, b) => s + b.total, 0);
+  openModal(title, `
+    <p class="info-line">عدد الفواتير: <b>${bills.length.toLocaleString("ar-EG")}</b> — الإجمالي: <b>${fmtMoney(total)}</b></p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>اسم العميل</th><th>قيمة الفاتورة</th></tr></thead>
+        <tbody>${billRowsCompact(bills)}</tbody>
+      </table>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">إغلاق</button></div>
+  `);
+}
+function openDayBills(key) {
+  const bills = DB.bills.filter((b) => b.date.slice(0, 10) === key);
+  showBillsModal("مبيعات يوم " + fmtDate(key), bills);
+}
+function openMonthBills(key) {
+  const bills = DB.bills.filter((b) => {
+    const d = new Date(b.date);
+    return (d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0")) === key;
+  });
+  const parts = key.split("-");
+  showBillsModal("مبيعات " + MONTH_NAMES[parseInt(parts[1], 10) - 1] + " " + parts[0], bills);
+}
+
 /* إظهار واجهة واحدة فقط من واجهات التطبيق */
 function showOnlyView(viewId) {
   ["employee-view", "manager-view", "client-view", "subpage-view"].forEach((v) => {
@@ -257,7 +351,7 @@ function doEmployeeSearch() {
     box.innerHTML = '<p class="empty-msg">الرجاء كتابة اسم العميل للبحث.</p>';
     return;
   }
-  const matches = DB.customers.filter((c) => c.name.includes(q));
+  const matches = matchCustomers(q);
   if (matches.length === 0) {
     box.innerHTML = '<p class="empty-msg">لا يوجد عميل بهذا الاسم.</p>';
     return;
@@ -460,10 +554,15 @@ function renderManager() {
 }
 
 /* ---------- تبويب العملاء ---------- */
-function renderClientsTab() {
-  // صافي المستحق: يطرح أرصدة العملاء الدائنة (المدفوع مقدماً) ليطابق كشف الإجمالي
-  const totalOutstanding = DB.customers.reduce((s, c) => s + balanceOf(c.id), 0);
-  const rows = DB.customers.map((c) => {
+let clientsQuery = "";
+function clientsRows() {
+  let custs = DB.customers;
+  if (clientsQuery.trim()) {
+    const set = new Set(matchCustomers(clientsQuery).map((c) => c.id));
+    custs = DB.customers.filter((c) => set.has(c.id));
+  }
+  if (!custs.length) return '<tr><td colspan="6" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>';
+  return custs.map((c) => {
     const bal = balanceOf(c.id);
     const cls = bal > 0 ? "badge-danger" : "badge-success";
     const label = bal > 0 ? "مستحق" : "مسدد";
@@ -480,6 +579,10 @@ function renderClientsTab() {
         </td>
       </tr>`;
   }).join("");
+}
+function renderClientsTab() {
+  // صافي المستحق: يطرح أرصدة العملاء الدائنة (المدفوع مقدماً) ليطابق كشف الإجمالي
+  const totalOutstanding = DB.customers.reduce((s, c) => s + balanceOf(c.id), 0);
 
   $("#tab-clients").innerHTML = `
     <div class="stats-row">
@@ -504,6 +607,9 @@ function renderClientsTab() {
       <p class="info-line" style="margin:0">اضغط على أي عميل لعرض ملفه الكامل.</p>
       <button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل</button>
     </div>
+    <div class="search-bar">
+      <input type="text" id="clients-search" placeholder="ابحث باسم العميل..." value="${clientsQuery.replace(/"/g, "&quot;")}" />
+    </div>
     <div class="table-wrap">
       <table class="data">
         <thead>
@@ -516,32 +622,36 @@ function renderClientsTab() {
             <th>إجراءات</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody id="clients-body">${clientsRows()}</tbody>
       </table>
     </div>`;
+  const inp = $("#clients-search");
+  if (inp) inp.oninput = () => { clientsQuery = inp.value; $("#clients-body").innerHTML = clientsRows(); };
 }
 
 /* ---------- تبويب المبيعات اليومية ---------- */
+let dailyFrom = "", dailyTo = "";
+function clearDailyFilter() { dailyFrom = ""; dailyTo = ""; renderDailyTab(); }
 function renderDailyTab() {
+  let bills = DB.bills;
+  if (dailyFrom) bills = bills.filter((b) => b.date.slice(0, 10) >= dailyFrom);
+  if (dailyTo) bills = bills.filter((b) => b.date.slice(0, 10) <= dailyTo);
   const map = {};
-  DB.bills.forEach((b) => {
+  bills.forEach((b) => {
     const key = b.date.slice(0, 10);
     if (!map[key]) map[key] = { total: 0, count: 0 };
     map[key].total += b.total;
     map[key].count += 1;
   });
   const keys = Object.keys(map).sort().reverse();
-  if (keys.length === 0) {
-    $("#tab-daily").innerHTML = '<p class="empty-msg">لا توجد مبيعات مسجلة.</p>';
-    return;
-  }
-  const rows = keys.map((k) => `
-    <tr>
+  const grand = keys.reduce((s, k) => s + map[k].total, 0);
+  const rows = keys.length ? keys.map((k) => `
+    <tr class="clickable-row" onclick="openDayBills('${k}')">
       <td>${fmtDate(k)}</td>
       <td class="num">${map[k].count}</td>
       <td class="num">${fmtMoney(map[k].total)}</td>
-    </tr>`).join("");
-  const grand = keys.reduce((s, k) => s + map[k].total, 0);
+      <td class="nav-cell">عرض ›</td>
+    </tr>`).join("") : '<tr><td colspan="4" class="empty-msg">لا توجد مبيعات في هذه الفترة.</td></tr>';
 
   $("#tab-daily").innerHTML = `
     <div class="stats-row">
@@ -554,14 +664,23 @@ function renderDailyTab() {
         <div class="stat-value">${fmtMoney(grand)}</div>
       </div>
     </div>
+    <div class="filter-bar">
+      <label>من تاريخ <input type="date" id="daily-from" value="${dailyFrom}" /></label>
+      <label>إلى تاريخ <input type="date" id="daily-to" value="${dailyTo}" /></label>
+      <button class="btn btn-outline btn-sm" onclick="clearDailyFilter()">مسح الفلتر</button>
+    </div>
+    <p class="info-line">اضغط على أي يوم لعرض كل فواتيره.</p>
     <div class="table-wrap">
       <table class="data">
         <thead>
-          <tr><th>اليوم</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th></tr>
+          <tr><th>اليوم</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th></th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
+  const f = $("#daily-from"), t = $("#daily-to");
+  if (f) f.onchange = () => { dailyFrom = f.value; renderDailyTab(); };
+  if (t) t.onchange = () => { dailyTo = t.value; renderDailyTab(); };
 }
 
 /* ---------- تبويب المبيعات الشهرية ---------- */
@@ -581,10 +700,11 @@ function renderMonthlyTab() {
     return;
   }
   const rows = keys.map((k) => `
-    <tr>
+    <tr class="clickable-row" onclick="openMonthBills('${k}')">
       <td>${map[k].label}</td>
       <td class="num">${map[k].count}</td>
       <td class="num">${fmtMoney(map[k].total)}</td>
+      <td class="nav-cell">عرض ›</td>
     </tr>`).join("");
   const grand = keys.reduce((s, k) => s + map[k].total, 0);
 
@@ -599,10 +719,11 @@ function renderMonthlyTab() {
         <div class="stat-value">${fmtMoney(grand)}</div>
       </div>
     </div>
+    <p class="info-line">اضغط على أي شهر لعرض كل فواتيره.</p>
     <div class="table-wrap">
       <table class="data">
         <thead>
-          <tr><th>الشهر</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th></tr>
+          <tr><th>الشهر</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th></th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -610,8 +731,15 @@ function renderMonthlyTab() {
 }
 
 /* ---------- تبويب كشف الحسابات ---------- */
-function renderStatementTab() {
-  const rows = DB.customers.map((c) => {
+let statementQuery = "";
+function statementRows() {
+  let custs = DB.customers;
+  if (statementQuery.trim()) {
+    const set = new Set(matchCustomers(statementQuery).map((c) => c.id));
+    custs = DB.customers.filter((c) => set.has(c.id));
+  }
+  if (!custs.length) return '<tr><td colspan="6" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>';
+  return custs.map((c) => {
     const bal = balanceOf(c.id);
     return `
       <tr class="clickable-row" onclick="openClientProfile(${c.id})">
@@ -623,8 +751,12 @@ function renderStatementTab() {
         <td class="num">${fmtMoney(bal)}</td>
       </tr>`;
   }).join("");
-
+}
+function renderStatementTab() {
   $("#tab-statement").innerHTML = `
+    <div class="search-bar">
+      <input type="text" id="statement-search" placeholder="ابحث باسم العميل..." value="${statementQuery.replace(/"/g, "&quot;")}" />
+    </div>
     <p class="info-line">كشف حساب مختصر لكل عميل — اضغط على العميل لعرض التفاصيل الكاملة.</p>
     <div class="table-wrap">
       <table class="data">
@@ -638,9 +770,11 @@ function renderStatementTab() {
             <th>الرصيد المستحق</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody id="statement-body">${statementRows()}</tbody>
       </table>
     </div>`;
+  const inp = $("#statement-search");
+  if (inp) inp.oninput = () => { statementQuery = inp.value; $("#statement-body").innerHTML = statementRows(); };
 }
 
 /* ---------- تبويب الأرصدة الدائنة (العملاء الذين دفعوا أكثر من مستحقاتهم) ---------- */
