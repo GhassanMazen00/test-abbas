@@ -58,6 +58,19 @@ function totalBills(id) { return billsOf(id).reduce((s, b) => s + b.total, 0); }
 function totalPayments(id) { return paymentsOf(id).reduce((s, p) => s + p.amount, 0); }
 function balanceOf(id) { return totalBills(id) - totalPayments(id); }
 
+/* ---------- أنواع الحركات الدائنة ---------- */
+const PAY_KINDS = {
+  payment:  { label: "دفعة",  badge: "badge-success" },
+  transfer: { label: "ترحيل", badge: "badge-transfer" },
+  discount: { label: "خصم",   badge: "badge-warning" },
+  return:   { label: "مرتجع", badge: "badge-warning" }
+};
+function kindOf(p) { return PAY_KINDS[p.kind] ? p.kind : "payment"; }
+function kindLabel(k) { return (PAY_KINDS[k] || PAY_KINDS.payment).label; }
+function kindBadge(k) { const d = PAY_KINDS[k] || PAY_KINDS.payment; return `<span class="badge ${d.badge}">${d.label}</span>`; }
+function docCell(d) { return d ? String(d) : "—"; }
+function sumKind(id, k) { return paymentsOf(id).filter((p) => kindOf(p) === k).reduce((s, p) => s + p.amount, 0); }
+
 const MONTH_NAMES = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
 let lastManagerTab = "clients"; // لتذكّر التبويب عند العودة من صفحة العميل
 let profileCustId = null;       // العميل المفتوح ملفه حالياً
@@ -270,6 +283,10 @@ function openBillForm(custId, editId) {
     : `التاريخ: <b>${fmtDateTime(new Date().toISOString())}</b> (يُسجَّل تلقائياً)`;
   openModal((editing ? "تعديل فاتورة — " : "فاتورة جديدة — ") + cust.name, `
     <p class="info-line">${dateLine}</p>
+    <div class="field">
+      <label>رقم الكشف (اختياري)</label>
+      <input type="text" id="bill-docno" placeholder="مثال: 42690" value="${editing ? (bill.docNo || "") : ""}" />
+    </div>
     <div class="table-wrap">
       <table class="bill-items">
         <thead>
@@ -346,20 +363,21 @@ function saveBill(custId, editId) {
     return;
   }
   const total = items.reduce((s, it) => s + it.count * it.price, 0);
+  const docNo = ($("#bill-docno") ? $("#bill-docno").value : "").trim();
   const editing = editId != null;
   confirmDialog(
     editing ? "تأكيد تعديل الفاتورة" : "تأكيد الفاتورة",
     (editing ? "هل تريد حفظ التعديلات على الفاتورة؟" : "هل تريد إضافة هذه الفاتورة؟") + " الإجمالي: " + fmtMoney(total),
-    () => commitBill(custId, editing ? editId : null, items, total)
+    () => commitBill(custId, editing ? editId : null, items, total, docNo)
   );
 }
-async function commitBill(custId, editId, items, total) {
+async function commitBill(custId, editId, items, total, docNo) {
   try {
     if (editId != null) {
-      await Store.updateBill(editId, items, total);
+      await Store.updateBill(editId, items, total, docNo);
       closeModal(); toast("تم تعديل الفاتورة بنجاح"); refreshSubpage();
     } else {
-      await Store.addBill(custId, items, total);
+      await Store.addBill(custId, items, total, docNo);
       closeModal(); toast("تم حفظ الفاتورة بنجاح"); refreshSubpage();
     }
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الفاتورة"), true); }
@@ -380,6 +398,10 @@ function openPaymentForm(custId, editId) {
       <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
+      <label>رقم الدفعة (اختياري)</label>
+      <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? (pay.docNo || "") : ""}" />
+    </div>
+    <div class="field">
       <label>ملاحظة</label>
       <textarea id="pay-note" placeholder="ملاحظة اختيارية...">${editing ? (pay.note || "") : ""}</textarea>
     </div>
@@ -393,6 +415,7 @@ function openPaymentForm(custId, editId) {
 function savePayment(custId, editId) {
   const amount = Number($("#pay-amount").value) || 0;
   const note = $("#pay-note").value.trim();
+  const docNo = ($("#pay-docno") ? $("#pay-docno").value : "").trim();
   if (amount <= 0) {
     toast("الرجاء إدخال مبلغ صحيح", true);
     return;
@@ -401,16 +424,16 @@ function savePayment(custId, editId) {
   confirmDialog(
     editing ? "تأكيد تعديل الدفعة" : "تأكيد الدفعة",
     (editing ? "هل تريد حفظ التعديلات على الدفعة؟" : "هل تريد إضافة هذه الدفعة؟") + " المبلغ: " + fmtMoney(amount),
-    () => commitPayment(custId, editing ? editId : null, amount, note)
+    () => commitPayment(custId, editing ? editId : null, amount, note, docNo)
   );
 }
-async function commitPayment(custId, editId, amount, note) {
+async function commitPayment(custId, editId, amount, note, docNo) {
   try {
     if (editId != null) {
-      await Store.updatePayment(editId, amount, note);
+      await Store.updatePayment(editId, amount, note, docNo);
       closeModal(); toast("تم تعديل الدفعة بنجاح"); refreshSubpage();
     } else {
-      await Store.addPayment(custId, amount, note);
+      await Store.addPayment(custId, amount, note, docNo, "payment");
       closeModal(); toast("تم حفظ الدفعة بنجاح"); refreshSubpage();
     }
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الدفعة"), true); }
@@ -629,9 +652,15 @@ function clientStats(id) {
   const distinctItems = new Set();
   bills.forEach((b) => b.items.forEach((it) => distinctItems.add(it.description)));
   const allDates = [...bills, ...payments].map((r) => new Date(r.date));
+  const tCash = sumKind(id, "payment");
+  const tTransfer = sumKind(id, "transfer");
+  const tDiscount = sumKind(id, "discount");
+  const tReturn = sumKind(id, "return");
+  const numCash = payments.filter((p) => kindOf(p) === "payment").length;
   return {
     bills, payments,
     tBills, tPays,
+    tCash, tTransfer, tDiscount, tReturn, numCash,
     balance: tBills - tPays,
     numBills: bills.length,
     numPayments: payments.length,
@@ -703,6 +732,7 @@ function renderBillsPage(custId) {
   const rows = bills.length ? bills.map((b) => `
     <tr>
       <td>#${b.id}</td>
+      <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDateTime(b.date)}</td>
       <td>${b.items.map((it) => `${it.description} (${it.count.toLocaleString("ar-EG")} × ${fmtMoney(it.price)})`).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
@@ -712,7 +742,7 @@ function renderBillsPage(custId) {
         <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
       </td>
     </tr>`).join("") :
-    '<tr><td colspan="6" class="empty-msg">لا توجد فواتير.</td></tr>';
+    '<tr><td colspan="7" class="empty-msg">لا توجد فواتير.</td></tr>';
   return `
     ${subpageHeader(custId, "الفواتير")}
     <div class="section-head">
@@ -721,7 +751,7 @@ function renderBillsPage(custId) {
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم</th><th>التاريخ</th><th>الأصناف</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -733,7 +763,9 @@ function renderPaymentsPage(custId) {
   const rows = payments.length ? payments.map((p) => `
     <tr>
       <td>#${p.id}</td>
+      <td class="num">${docCell(p.docNo)}</td>
       <td>${fmtDateTime(p.date)}</td>
+      <td>${kindBadge(kindOf(p))}</td>
       <td class="num">${fmtMoney(p.amount)}</td>
       <td>${p.note || "—"}</td>
       <td class="row-actions">
@@ -741,16 +773,16 @@ function renderPaymentsPage(custId) {
         <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">حذف</button>
       </td>
     </tr>`).join("") :
-    '<tr><td colspan="5" class="empty-msg">لا توجد دفعات.</td></tr>';
+    '<tr><td colspan="7" class="empty-msg">لا توجد حركات.</td></tr>';
   return `
-    ${subpageHeader(custId, "الدفعات")}
+    ${subpageHeader(custId, "الدفعات والحركات")}
     <div class="section-head">
-      <p class="info-line" style="margin:0">إجمالي الدفعات: <b>${fmtMoney(totalPayments(custId))}</b> — العدد: <b>${payments.length.toLocaleString("ar-EG")}</b></p>
+      <p class="info-line" style="margin:0">إجمالي الحركات الدائنة: <b>${fmtMoney(totalPayments(custId))}</b> — العدد: <b>${payments.length.toLocaleString("ar-EG")}</b></p>
       <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم</th><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم</th><th>رقم الدفعة</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>ملاحظة</th><th>إجراءات</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -761,32 +793,33 @@ function renderStatementPage(custId) {
   const bills = billsOf(custId);
   const payments = paymentsOf(custId);
   const entries = [
-    ...bills.map((b) => ({ date: b.date, type: "bill", desc: b.items.map((it) => it.description).join("، ") || "فاتورة", debit: b.total, credit: 0 })),
-    ...payments.map((p) => ({ date: p.date, type: "payment", desc: p.note || "دفعة", debit: 0, credit: p.amount }))
+    ...bills.map((b) => ({ date: b.date, type: "bill", docNo: b.docNo || "", desc: b.items.map((it) => it.description).join("، ") || "فاتورة", debit: b.total, credit: 0 })),
+    ...payments.map((p) => ({ date: p.date, type: "payment", kind: kindOf(p), docNo: p.docNo || "", desc: p.note || kindLabel(kindOf(p)), debit: 0, credit: p.amount }))
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
   let running = 0;
   const rows = entries.length ? entries.map((e) => {
     running += e.debit - e.credit;
     const typeBadge = e.type === "bill"
       ? '<span class="badge badge-danger">فاتورة</span>'
-      : '<span class="badge badge-success">دفعة</span>';
+      : kindBadge(e.kind);
     return `
       <tr>
         <td>${fmtDate(e.date)}</td>
+        <td class="num">${docCell(e.docNo)}</td>
         <td>${typeBadge}</td>
         <td>${e.desc}</td>
         <td class="num">${e.debit ? fmtMoney(e.debit) : "—"}</td>
         <td class="num">${e.credit ? fmtMoney(e.credit) : "—"}</td>
         <td class="num">${fmtMoney(running)}</td>
       </tr>`;
-  }).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد حركات.</td></tr>';
+  }).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد حركات.</td></tr>';
   const bal = balanceOf(custId);
   return `
     ${subpageHeader(custId, "كشف الحساب")}
     <p class="info-line">الرصيد المستحق الحالي: <b>${fmtMoney(bal)}</b></p>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>التاريخ</th><th>النوع</th><th>البيان</th><th>مدين (فاتورة)</th><th>دائن (دفعة)</th><th>الرصيد الجاري</th></tr></thead>
+        <thead><tr><th>التاريخ</th><th>رقم</th><th>النوع</th><th>البيان</th><th>مدين (فاتورة)</th><th>دائن</th><th>الرصيد الجاري</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -879,14 +912,17 @@ function renderClientProfile(custId) {
 
     <div class="stats-row">
       ${statCard("إجمالي الفواتير", fmtMoney(s.tBills))}
-      ${statCard("إجمالي الدفعات", fmtMoney(s.tPays))}
+      ${statCard("إجمالي المدفوعات النقدية", fmtMoney(s.tCash))}
       ${statCard("الرصيد المستحق", fmtMoney(s.balance), balCls)}
       ${statCard("نسبة السداد", s.payRatio.toLocaleString("ar-EG") + "٪")}
     </div>
 
     <div class="stats-grid">
       ${statCard("عدد الفواتير", s.numBills.toLocaleString("ar-EG"))}
-      ${statCard("عدد الدفعات", s.numPayments.toLocaleString("ar-EG"))}
+      ${statCard("عدد المدفوعات النقدية", s.numCash.toLocaleString("ar-EG"))}
+      ${s.tTransfer ? statCard("إجمالي الترحيل", fmtMoney(s.tTransfer)) : ""}
+      ${s.tDiscount ? statCard("إجمالي الخصومات", fmtMoney(s.tDiscount)) : ""}
+      ${s.tReturn ? statCard("إجمالي المرتجعات", fmtMoney(s.tReturn)) : ""}
       ${statCard("إجمالي الأصناف المباعة", s.itemsSold.toLocaleString("ar-EG"))}
       ${statCard("أنواع الأصناف", s.distinctItems.toLocaleString("ar-EG"))}
       ${statCard("متوسط قيمة الفاتورة", fmtMoney(Math.round(s.avgBill)))}
@@ -899,7 +935,7 @@ function renderClientProfile(custId) {
     <h4 class="nav-cards-title">سجلات العميل</h4>
     <div class="nav-cards">
       ${navCard("bills", "🧾", "الفواتير", "عرض وتعديل وحذف — " + s.numBills.toLocaleString("ar-EG") + " فاتورة")}
-      ${navCard("payments", "💵", "الدفعات", "عرض وتعديل وحذف — " + s.numPayments.toLocaleString("ar-EG") + " دفعة")}
+      ${navCard("payments", "💵", "الدفعات والحركات", "دفعات وترحيل وخصم ومرتجع — " + s.numPayments.toLocaleString("ar-EG") + " حركة")}
       ${navCard("statement", "📊", "كشف الحساب", "الحركة الكاملة والرصيد الجاري")}
       ${navCard("analytics", "📈", "التحليلات", "أبرز الأصناف والنشاط الشهري")}
     </div>

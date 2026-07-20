@@ -16,8 +16,8 @@ const Store = (function () {
 
   /* تحويل صفوف الخادم إلى شكل التطبيق */
   const mapCustomer = (r) => ({ id: r.id, name: r.name });
-  const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0 });
-  const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "" });
+  const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0, docNo: r.doc_no || "" });
+  const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment" });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -90,19 +90,21 @@ const Store = (function () {
     },
 
     /* ---------- الفواتير ---------- */
-    async addBill(customerId, items, total) {
+    async addBill(customerId, items, total, docNo) {
+      docNo = docNo || "";
       if (!useSupabase) {
         DB.seq.bill++;
-        const bill = { id: DB.seq.bill, customerId, date: new Date().toISOString(), items, total };
+        const bill = { id: DB.seq.bill, customerId, date: new Date().toISOString(), items, total, docNo };
         DB.bills.push(bill); saveDB(DB); return bill;
       }
-      const { data, error } = await sb.from("bills").insert({ customer_id: customerId, items, total }).select().single();
+      const { data, error } = await sb.from("bills").insert({ customer_id: customerId, items, total, doc_no: docNo }).select().single();
       if (error) throw error;
       const bill = mapBill(data); DB.bills.push(bill); return bill;
     },
-    async updateBill(id, items, total) {
-      if (useSupabase) { const { error } = await sb.from("bills").update({ items, total }).eq("id", id); if (error) throw error; }
-      const bl = DB.bills.find((b) => b.id === id); if (bl) { bl.items = items; bl.total = total; }
+    async updateBill(id, items, total, docNo) {
+      docNo = docNo || "";
+      if (useSupabase) { const { error } = await sb.from("bills").update({ items, total, doc_no: docNo }).eq("id", id); if (error) throw error; }
+      const bl = DB.bills.find((b) => b.id === id); if (bl) { bl.items = items; bl.total = total; bl.docNo = docNo; }
       if (!useSupabase) saveDB(DB);
     },
     async deleteBill(id) {
@@ -112,19 +114,21 @@ const Store = (function () {
     },
 
     /* ---------- الدفعات ---------- */
-    async addPayment(customerId, amount, note) {
+    async addPayment(customerId, amount, note, docNo, kind) {
+      docNo = docNo || ""; kind = kind || "payment";
       if (!useSupabase) {
         DB.seq.payment++;
-        const pay = { id: DB.seq.payment, customerId, date: new Date().toISOString(), amount, note };
+        const pay = { id: DB.seq.payment, customerId, date: new Date().toISOString(), amount, note, docNo, kind };
         DB.payments.push(pay); saveDB(DB); return pay;
       }
-      const { data, error } = await sb.from("payments").insert({ customer_id: customerId, amount, note }).select().single();
+      const { data, error } = await sb.from("payments").insert({ customer_id: customerId, amount, note, doc_no: docNo, kind }).select().single();
       if (error) throw error;
       const pay = mapPayment(data); DB.payments.push(pay); return pay;
     },
-    async updatePayment(id, amount, note) {
-      if (useSupabase) { const { error } = await sb.from("payments").update({ amount, note }).eq("id", id); if (error) throw error; }
-      const py = DB.payments.find((p) => p.id === id); if (py) { py.amount = amount; py.note = note; }
+    async updatePayment(id, amount, note, docNo) {
+      docNo = docNo || "";
+      if (useSupabase) { const { error } = await sb.from("payments").update({ amount, note, doc_no: docNo }).eq("id", id); if (error) throw error; }
+      const py = DB.payments.find((p) => p.id === id); if (py) { py.amount = amount; py.note = note; py.docNo = docNo; }
       if (!useSupabase) saveDB(DB);
     },
     async deletePayment(id) {
