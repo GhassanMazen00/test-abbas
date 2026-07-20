@@ -15,7 +15,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="css/styles.css?v=2026072010" />
+  <link rel="stylesheet" href="css/styles.css?v=2026072011" />
 </head>
 <body>
 
@@ -62,20 +62,39 @@
       </div>
     </header>
 
-    <!-- ===================== واجهة الموظف ===================== -->
+    <!-- ===================== واجهة الموظف (worker1) ===================== -->
     <main id="employee-view" class="view hidden">
       <div class="container">
+        <nav class="tabs">
+          <button class="tab active" data-emp="add" onclick="empShow('add')">إضافة</button>
+          <button class="tab" data-emp="rejected" onclick="empShow('rejected')">المرفوضات <span id="rej-badge" class="tab-badge hidden">0</span></button>
+        </nav>
+
+        <div id="emp-add" class="emp-panel">
+          <div class="section-head">
+            <h2 class="page-title" style="margin:0">البحث عن عميل</h2>
+            <button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل جديد</button>
+          </div>
+
+          <div class="search-bar">
+            <input type="text" id="employee-search" placeholder="اكتب اسم العميل ثم اضغط بحث..." />
+            <button id="employee-search-btn" class="btn btn-primary">بحث</button>
+          </div>
+
+          <div id="employee-results" class="results"></div>
+        </div>
+
+        <div id="emp-rejected" class="emp-panel hidden"></div>
+      </div>
+    </main>
+
+    <!-- ===================== واجهة المراجِع (worker2) ===================== -->
+    <main id="review-view" class="view hidden">
+      <div class="container">
         <div class="section-head">
-          <h2 class="page-title" style="margin:0">البحث عن عميل</h2>
-          <button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل جديد</button>
+          <h2 class="page-title" style="margin:0">مراجعة إدخالات الموظفين</h2>
         </div>
-
-        <div class="search-bar">
-          <input type="text" id="employee-search" placeholder="اكتب اسم العميل ثم اضغط بحث..." />
-          <button id="employee-search-btn" class="btn btn-primary">بحث</button>
-        </div>
-
-        <div id="employee-results" class="results"></div>
+        <div id="review-content"></div>
       </div>
     </main>
 
@@ -148,9 +167,9 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="js/vendor/supabase.js"></script>
-  <script src="js/config.js?v=2026072010"></script>
-  <script src="js/data.js?v=2026072010"></script>
-  <script src="js/store.js?v=2026072010"></script>
-  <script src="js/app.js?v=2026072010"></script>
+  <script src="js/config.js?v=2026072011"></script>
+  <script src="js/data.js?v=2026072011"></script>
+  <script src="js/store.js?v=2026072011"></script>
+  <script src="js/app.js?v=2026072011"></script>
 </body>
 </html>

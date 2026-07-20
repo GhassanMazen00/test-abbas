@@ -8,6 +8,11 @@ let DB = (Store.mode === "supabase")
   : initDB();
 let currentUser = null;
 
+/* ---------- الأدوار ---------- */
+const REVIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.REVIEWER_USERNAME) || "worker2";
+function isReviewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === REVIEWER_USERNAME; }
+function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME; }
+
 /* ---------- أدوات مساعدة ---------- */
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -172,7 +177,7 @@ function openMonthBills(key) {
 
 /* إظهار واجهة واحدة فقط من واجهات التطبيق */
 function showOnlyView(viewId) {
-  ["employee-view", "manager-view", "client-view", "subpage-view"].forEach((v) => {
+  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view"].forEach((v) => {
     const el = document.getElementById(v);
     if (el) el.classList.toggle("hidden", v !== viewId);
   });
@@ -340,6 +345,8 @@ $("#login-form").addEventListener("submit", async (e) => {
 
 $("#logout-btn").addEventListener("click", async () => {
   stopRequestPolling();
+  stopReviewPolling();
+  stopMakerPolling();
   try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
   await Store.signOut();
   currentUser = null;
@@ -404,22 +411,150 @@ function startApp() {
   $("#login-screen").classList.add("hidden");
   $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#current-user").textContent =
-    (currentUser.role === "manager" ? "المدير" : "الموظف") + ": " + currentUser.username;
+  const roleLabel = currentUser.role === "manager" ? "المدير" : (isReviewer() ? "المراجِع" : "الموظف");
+  $("#current-user").textContent = roleLabel + ": " + currentUser.username;
 
   if (currentUser.role === "manager") {
     document.querySelector('.tab[data-tab="requests"]').classList.remove("hidden");
     showOnlyView("manager-view");
     renderManager();
     startRequestPolling();
+  } else if (isReviewer()) {
+    showOnlyView("review-view");
+    renderReview();
+    startReviewPolling();
   } else {
-    document.querySelector('.tab[data-tab="requests"]').classList.add("hidden");
     showOnlyView("employee-view");
+    empShow("add");
     $("#employee-search").value = "";
     $("#employee-results").innerHTML =
       '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
+    startMakerPolling();
   }
 }
+
+/* =========================================================
+   مراجعة الإدخالات (worker1 يرسل → worker2 يراجع)
+   ========================================================= */
+let reviewPollTimer = null, makerPollTimer = null;
+let pendingEntries = [], rejectedEntries = [];
+
+function entryKindBadge(k) {
+  if (k === "bill") return '<span class="badge badge-danger">فاتورة</span>';
+  if (k === "return") return '<span class="badge badge-warning">مرتجع</span>';
+  return '<span class="badge badge-success">دفعة</span>';
+}
+function entryAmount(e) {
+  return e.kind === "bill" ? (e.payload.total || 0) : (e.payload.amount || 0);
+}
+function entryDetail(e) {
+  const doc = e.payload.docNo ? ("رقم: " + e.payload.docNo) : "بدون رقم";
+  if (e.kind === "bill") {
+    const n = (e.payload.items || []).reduce((s, it) => s + (Number(it.count) || 0), 0);
+    return `${doc} — ${(e.payload.items || []).length} صنف / ${n.toLocaleString("ar-EG")} قطعة`;
+  }
+  return `${doc}${e.payload.note ? " — " + e.payload.note : ""}`;
+}
+
+/* --------- جهة المراجِع (worker2) --------- */
+function renderReview() {
+  const rows = pendingEntries.length ? pendingEntries.map((e) => `
+    <tr>
+      <td>${entryKindBadge(e.kind)}</td>
+      <td>${e.customerName || "—"}</td>
+      <td>${entryDetail(e)}</td>
+      <td class="num">${fmtMoney(entryAmount(e))}</td>
+      <td>${e.createdBy || "—"}</td>
+      <td>${e.created_at ? fmtDateTime(e.created_at) : "—"}</td>
+      <td class="row-actions">
+        <button class="btn btn-success btn-sm" onclick="approveEntry(${e.id})">موافقة</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectEntry(${e.id})">رفض</button>
+      </td>
+    </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد إدخالات بانتظار المراجعة.</td></tr>';
+  $("#review-content").innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">بانتظار المراجعة</div>
+        <div class="stat-value">${pendingEntries.length.toLocaleString("ar-EG")}</div>
+      </div>
+    </div>
+    <p class="info-line">راجع كل إدخال ثم وافق (يُضاف للنظام) أو ارفض (يعود للموظف في قائمة المرفوضات). يُحدَّث تلقائياً.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>الوقت</th><th>القرار</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+async function refreshReview() {
+  if (!isReviewer()) return;
+  try { pendingEntries = await Store.listPendingEntries(); } catch (e) { return; }
+  renderReview();
+}
+function startReviewPolling() { stopReviewPolling(); refreshReview(); reviewPollTimer = setInterval(refreshReview, 5000); }
+function stopReviewPolling() { if (reviewPollTimer) { clearInterval(reviewPollTimer); reviewPollTimer = null; } }
+function findEntry(id) { return pendingEntries.find((e) => e.id === id); }
+async function approveEntry(id) {
+  const e = findEntry(id);
+  if (!e) return;
+  try {
+    if (e.kind === "bill") {
+      await Store.addBill(e.customerId, e.payload.items, e.payload.total, e.payload.docNo);
+    } else {
+      await Store.addPayment(e.customerId, e.payload.amount, e.payload.note, e.payload.docNo, e.payload.kind || (e.kind === "return" ? "return" : "payment"));
+    }
+    await Store.decidePendingEntry(id, true, currentUser.username);
+    toast("تمت الموافقة وأُضيف للنظام");
+    await refreshReview();
+  } catch (err) { toast(errMsg(err, "تعذّر تنفيذ الموافقة"), true); }
+}
+async function rejectEntry(id) {
+  try {
+    await Store.decidePendingEntry(id, false, currentUser.username);
+    toast("تم رفض الإدخال");
+    await refreshReview();
+  } catch (err) { toast(errMsg(err, "تعذّر الرفض"), true); }
+}
+
+/* --------- جهة الموظف (worker1): المرفوضات --------- */
+function empShow(which) {
+  $("#emp-add").classList.toggle("hidden", which !== "add");
+  $("#emp-rejected").classList.toggle("hidden", which !== "rejected");
+  $$('#employee-view .tab').forEach((t) => t.classList.toggle("active", t.dataset.emp === which));
+  if (which === "rejected") renderRejected();
+}
+function updateRejBadge(n) {
+  const b = $("#rej-badge");
+  if (!b) return;
+  b.textContent = n;
+  b.classList.toggle("hidden", !n);
+}
+function renderRejected() {
+  const rows = rejectedEntries.length ? rejectedEntries.map((e) => `
+    <tr>
+      <td>${entryKindBadge(e.kind)}</td>
+      <td>${e.customerName || "—"}</td>
+      <td>${entryDetail(e)}</td>
+      <td class="num">${fmtMoney(entryAmount(e))}</td>
+      <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
+    </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+  $("#emp-rejected").innerHTML = `
+    <p class="info-line">إدخالات رفضها المراجِع. يمكنك إعادة إدخالها بشكل صحيح من تبويب «إضافة».</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>وقت الرفض</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+async function refreshMaker() {
+  if (!isMaker()) return;
+  try { rejectedEntries = await Store.listRejectedEntries(currentUser.username); } catch (e) { return; }
+  updateRejBadge(rejectedEntries.length);
+  if (!$("#emp-rejected").classList.contains("hidden")) renderRejected();
+}
+function startMakerPolling() { stopMakerPolling(); refreshMaker(); makerPollTimer = setInterval(refreshMaker, 6000); }
+function stopMakerPolling() { if (makerPollTimer) { clearInterval(makerPollTimer); makerPollTimer = null; } }
 
 /* ---------- طلبات الدخول (جهة المدير) ---------- */
 function updateReqBadge(n) {
@@ -621,6 +756,15 @@ async function commitBill(custId, editId, items, total, docNo) {
     if (editId != null) {
       await Store.updateBill(editId, items, total, docNo);
       closeModal(); toast("تم تعديل الفاتورة بنجاح"); refreshSubpage();
+    } else if (isMaker()) {
+      const cust = customerById(custId);
+      try {
+        await Store.createPendingEntry("bill", custId, cust ? cust.name : "", { items, total, docNo }, currentUser.username);
+        closeModal(); toast("تم إرسال الفاتورة للمراجعة");
+      } catch (er) {
+        await Store.addBill(custId, items, total, docNo); // جدول المراجعة غير موجود بعد → إضافة مباشرة
+        closeModal(); toast("تم حفظ الفاتورة بنجاح"); refreshSubpage();
+      }
     } else {
       await Store.addBill(custId, items, total, docNo);
       closeModal(); toast("تم حفظ الفاتورة بنجاح"); refreshSubpage();
@@ -688,6 +832,15 @@ async function commitPayment(custId, editId, amount, note, docNo, kind) {
     if (editId != null) {
       await Store.updatePayment(editId, amount, note, docNo);
       closeModal(); toast("تم تعديل " + word + " بنجاح"); refreshSubpage();
+    } else if (isMaker()) {
+      const cust = customerById(custId);
+      try {
+        await Store.createPendingEntry(kind === "return" ? "return" : "payment", custId, cust ? cust.name : "", { amount, note, docNo, kind }, currentUser.username);
+        closeModal(); toast("تم إرسال " + word + " للمراجعة");
+      } catch (er) {
+        await Store.addPayment(custId, amount, note, docNo, kind); // جدول المراجعة غير موجود بعد → إضافة مباشرة
+        closeModal(); toast("تم حفظ " + word + " بنجاح"); refreshSubpage();
+      }
     } else {
       await Store.addPayment(custId, amount, note, docNo, kind);
       closeModal(); toast("تم حفظ " + word + " بنجاح"); refreshSubpage();
@@ -698,10 +851,10 @@ async function commitPayment(custId, editId, amount, note, docNo, kind) {
 /* =========================================================
    واجهة المدير
    ========================================================= */
-$$(".tab").forEach((tab) => {
+$$("#manager-view .tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    $$(".tab").forEach((t) => t.classList.remove("active"));
-    $$(".tab-panel").forEach((p) => p.classList.remove("active"));
+    $$("#manager-view .tab").forEach((t) => t.classList.remove("active"));
+    $$("#manager-view .tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
     $("#tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "requests") renderRequestsTab();

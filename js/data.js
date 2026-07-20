@@ -26,8 +26,10 @@ const DEMO_CUSTOMERS = [
 
 /* حسابات المستخدمين (تجريبية) */
 const USERS = {
-  "موظف": { password: "1234", role: "employee", name: "الموظف" },
-  "مدير": { password: "1234", role: "manager",  name: "المدير" }
+  "موظف":   { password: "1234", role: "employee", name: "الموظف" },
+  "مدير":   { password: "1234", role: "manager",  name: "المدير" },
+  "worker1": { password: "1234", role: "employee", name: "الموظف الأول" },
+  "worker2": { password: "1234", role: "employee", name: "المراجِع" }
 };
 
 /* تهيئة قاعدة البيانات لأول مرة */

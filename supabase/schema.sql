@@ -61,6 +61,21 @@ create table if not exists public.login_requests (
 );
 create index if not exists login_requests_status_idx on public.login_requests(status);
 
+-- إدخالات بانتظار مراجعة الموظف المراجِع (worker1 → worker2) — انظر pending_entries.sql
+create table if not exists public.pending_entries (
+  id            bigint generated always as identity primary key,
+  kind          text not null check (kind in ('bill','payment','return')),
+  customer_id   bigint references public.customers(id) on delete cascade,
+  customer_name text,
+  payload       jsonb not null,
+  created_by    text,
+  status        text not null default 'pending' check (status in ('pending','approved','rejected')),
+  created_at    timestamptz not null default now(),
+  decided_by    text,
+  decided_at    timestamptz
+);
+create index if not exists pending_entries_status_idx on public.pending_entries(status);
+
 -- ---------- 2) دالة مساعدة: هل المستخدم الحالي مدير؟ ----------
 create or replace function public.is_manager()
 returns boolean
@@ -176,6 +191,18 @@ create policy login_requests_select on public.login_requests
 drop policy if exists login_requests_update on public.login_requests;
 create policy login_requests_update on public.login_requests
   for update to authenticated using (public.is_manager());
+
+-- pending_entries: أي مستخدم مسجّل يُنشئ ويقرأ ويحدّث (المراجعة داخلية بين الموظفين)
+alter table public.pending_entries enable row level security;
+drop policy if exists pending_entries_insert on public.pending_entries;
+create policy pending_entries_insert on public.pending_entries
+  for insert to authenticated with check (true);
+drop policy if exists pending_entries_select on public.pending_entries;
+create policy pending_entries_select on public.pending_entries
+  for select to authenticated using (true);
+drop policy if exists pending_entries_update on public.pending_entries;
+create policy pending_entries_update on public.pending_entries
+  for update to authenticated using (true);
 
 -- ---------- 5) (اختياري) أسماء العملاء التجريبية ----------
 -- احذف علامات التعليق إذا رغبت ببيانات مبدئية:
