@@ -456,6 +456,7 @@ function renderManager() {
   renderDailyTab();
   renderMonthlyTab();
   renderStatementTab();
+  renderCreditTab();
 }
 
 /* ---------- تبويب العملاء ---------- */
@@ -635,6 +636,49 @@ function renderStatementTab() {
             <th>عدد الدفعات</th>
             <th>إجمالي الدفعات</th>
             <th>الرصيد المستحق</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+/* ---------- تبويب الأرصدة الدائنة (العملاء الذين دفعوا أكثر من مستحقاتهم) ---------- */
+function renderCreditTab() {
+  const credit = DB.customers
+    .map((c) => ({ c, bal: balanceOf(c.id) }))
+    .filter((x) => x.bal < -0.005)
+    .sort((a, b) => a.bal - b.bal); // الأكبر رصيداً دائناً أولاً
+  const total = credit.reduce((s, x) => s + x.bal, 0);
+  const rows = credit.length
+    ? credit.map(({ c, bal }) => `
+      <tr class="clickable-row" onclick="openClientProfile(${c.id})">
+        <td>${c.name}</td>
+        <td class="num">${fmtMoney(totalBills(c.id))}</td>
+        <td class="num">${fmtMoney(totalPayments(c.id))}</td>
+        <td class="num"><b>${fmtMoney(-bal)}</b></td>
+      </tr>`).join("")
+    : '<tr><td colspan="4" class="empty-msg">لا يوجد عملاء لديهم رصيد دائن.</td></tr>';
+  $("#tab-credit").innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">عدد العملاء الدائنين</div>
+        <div class="stat-value">${credit.length.toLocaleString("ar-EG")}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">إجمالي الأرصدة الدائنة (لهم عندك)</div>
+        <div class="stat-value">${fmtMoney(-total)}</div>
+      </div>
+    </div>
+    <p class="info-line">هؤلاء العملاء دفعوا أكثر من قيمة فواتيرهم، فالرصيد لهم عندك (دفعة مقدمة/عربون). اضغط على العميل لعرض ملفه الكامل.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>اسم العميل</th>
+            <th>إجمالي الفواتير</th>
+            <th>إجمالي المدفوع</th>
+            <th>الرصيد الدائن (له عندك)</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
