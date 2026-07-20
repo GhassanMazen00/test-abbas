@@ -29,13 +29,13 @@ const Store = (function () {
       if (!useSupabase) {
         const acc = USERS[username];
         if (!acc || acc.password !== password) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
-        return { username, role: acc.role };
+        return { username, role: acc.role, userId: username };
       }
       const email = username.includes("@") ? username : username + "@" + domain;
       const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
       const { data: prof } = await sb.from("profiles").select("username, role").eq("id", data.user.id).single();
-      return { username: (prof && prof.username) || username, role: (prof && prof.role) || "employee" };
+      return { username: (prof && prof.username) || username, role: (prof && prof.role) || "employee", userId: data.user.id };
     },
     async signOut() {
       if (useSupabase) { try { await sb.auth.signOut(); } catch (e) {} }
@@ -47,7 +47,7 @@ const Store = (function () {
       const uid = data.session.user.id;
       const { data: prof } = await sb.from("profiles").select("username, role").eq("id", uid).single();
       if (!prof) return null;
-      return { username: prof.username, role: prof.role };
+      return { username: prof.username, role: prof.role, userId: uid };
     },
 
     /* ---------- تحميل كل البيانات إلى الذاكرة ---------- */
@@ -151,6 +151,46 @@ const Store = (function () {
       if (useSupabase) { const { error } = await sb.from("payments").delete().eq("id", id); if (error) throw error; }
       DB.payments = DB.payments.filter((p) => p.id !== id);
       if (!useSupabase) saveDB(DB);
+    },
+
+    /* ---------- طلبات الدخول (موافقة المدير) ---------- */
+    async createLoginRequest(userId, username, device) {
+      if (!useSupabase) {
+        const arr = lrLoad();
+        const id = (arr.reduce((m, r) => Math.max(m, r.id), 0) || 0) + 1;
+        arr.push({ id, userId, username, device, status: "pending", created_at: new Date().toISOString() });
+        lrSave(arr);
+        return { id };
+      }
+      const { data, error } = await sb.from("login_requests")
+        .insert({ user_id: userId, username, device, status: "pending" }).select().single();
+      if (error) throw error;
+      return { id: data.id };
+    },
+    async getLoginRequestStatus(id) {
+      if (!useSupabase) { const r = lrLoad().find((x) => x.id === id); return r ? r.status : "rejected"; }
+      const { data, error } = await sb.from("login_requests").select("status").eq("id", id).single();
+      if (error) throw error;
+      return data.status;
+    },
+    async listPendingLoginRequests() {
+      if (!useSupabase) { return lrLoad().filter((r) => r.status === "pending"); }
+      const { data, error } = await sb.from("login_requests").select("*").eq("status", "pending").order("created_at");
+      if (error) throw error;
+      return data.map((r) => ({ id: r.id, userId: r.user_id, username: r.username, device: r.device, status: r.status, created_at: r.created_at }));
+    },
+    async decideLoginRequest(id, approve) {
+      const status = approve ? "approved" : "rejected";
+      if (!useSupabase) {
+        const arr = lrLoad(); const r = arr.find((x) => x.id === id);
+        if (r) r.status = status;
+        lrSave(arr); return;
+      }
+      const { error } = await sb.from("login_requests").update({ status, decided_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
     }
   };
+
+  function lrLoad() { try { return JSON.parse(localStorage.getItem("login_requests_v1") || "[]"); } catch (e) { return []; } }
+  function lrSave(a) { try { localStorage.setItem("login_requests_v1", JSON.stringify(a)); } catch (e) {} }
 })();

@@ -277,6 +277,36 @@ function toast(msg, danger) {
 }
 
 /* ---------- تسجيل الدخول ---------- */
+/* ---------- كشف نوع الجهاز ---------- */
+function deviceInfo() {
+  const ua = navigator.userAgent || "";
+  let os = "نظام غير معروف";
+  if (/Windows/i.test(ua)) os = "Windows";
+  else if (/iPhone|iPad|iPod/i.test(ua)) os = "iOS";
+  else if (/Android/i.test(ua)) os = "Android";
+  else if (/Mac OS X/i.test(ua)) os = "macOS";
+  else if (/Linux/i.test(ua)) os = "Linux";
+  let browser = "متصفح";
+  if (/Edg\//i.test(ua)) browser = "Edge";
+  else if (/OPR\/|Opera/i.test(ua)) browser = "Opera";
+  else if (/Chrome\//i.test(ua)) browser = "Chrome";
+  else if (/Firefox\//i.test(ua)) browser = "Firefox";
+  else if (/Safari\//i.test(ua)) browser = "Safari";
+  const type = /iPad|Tablet/i.test(ua) ? "جهاز لوحي" : (/Mobile|iPhone|Android/i.test(ua) ? "هاتف" : "حاسوب");
+  return `${type} — ${os} — ${browser}`;
+}
+
+const APPROVED_KEY = "az_login_approved";
+let pendingRequests = [];
+let reqPollTimer = null;
+let waitTimer = null;
+
+/* إتمام الدخول بعد التحقق (وبعد الموافقة إن لزم) */
+async function finishLogin() {
+  try { await Store.loadAll(); } catch (e) { toast(errMsg(e, "تعذّر تحميل البيانات"), true); }
+  startApp();
+}
+
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const u = $("#username").value.trim();
@@ -288,10 +318,19 @@ $("#login-form").addEventListener("submit", async (e) => {
   const label = btn.textContent; btn.textContent = "جارٍ الدخول...";
   try {
     const sess = await Store.signIn(u, p);
-    currentUser = { username: sess.username, role: sess.role };
-    await Store.loadAll();
+    currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     $("#login-form").reset();
-    startApp();
+    try { localStorage.removeItem(APPROVED_KEY); } catch (er) {}
+    // المدير يدخل مباشرة؛ الموظف ينتظر موافقة المدير
+    if (currentUser.role !== "manager") {
+      let reqId = null;
+      try {
+        const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo());
+        reqId = r && r.id;
+      } catch (er) { reqId = null; } // جدول الطلبات غير موجود بعد → دخول مباشر (حتى لا يتعطّل التطبيق)
+      if (reqId != null) { startWaiting(reqId); return; }
+    }
+    await finishLogin();
   } catch (err) {
     $("#login-error").textContent = (err && err.message) ? err.message : "تعذّر تسجيل الدخول";
   } finally {
@@ -300,6 +339,8 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 
 $("#logout-btn").addEventListener("click", async () => {
+  stopRequestPolling();
+  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
   await Store.signOut();
   currentUser = null;
   $("#app").classList.add("hidden");
@@ -311,29 +352,130 @@ $("#logout-btn").addEventListener("click", async () => {
   if (Store.mode !== "supabase") return;
   try {
     const sess = await Store.restoreSession();
-    if (sess) {
-      currentUser = { username: sess.username, role: sess.role };
-      await Store.loadAll();
-      startApp();
+    if (!sess) return;
+    currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
+    // الموظف يحتاج موافقة إن لم يكن قد وُوفق على جلسته
+    let approved = false;
+    try { approved = localStorage.getItem(APPROVED_KEY) === "1"; } catch (e) {}
+    if (currentUser.role !== "manager" && !approved) {
+      let reqId = null;
+      try { const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo()); reqId = r && r.id; } catch (er) { reqId = null; }
+      if (reqId != null) { startWaiting(reqId); return; }
     }
+    await finishLogin();
   } catch (e) { /* تجاهل */ }
 })();
 
+/* ---------- شاشة انتظار موافقة المدير (جهة الموظف) ---------- */
+function startWaiting(reqId) {
+  $("#login-screen").classList.add("hidden");
+  $("#app").classList.add("hidden");
+  $("#waiting-screen").classList.remove("hidden");
+  if (waitTimer) clearInterval(waitTimer);
+  waitTimer = setInterval(async () => {
+    let st;
+    try { st = await Store.getLoginRequestStatus(reqId); } catch (e) { return; }
+    if (st === "approved") {
+      clearInterval(waitTimer); waitTimer = null;
+      try { localStorage.setItem(APPROVED_KEY, "1"); } catch (e) {}
+      $("#waiting-screen").classList.add("hidden");
+      await finishLogin();
+    } else if (st === "rejected") {
+      clearInterval(waitTimer); waitTimer = null;
+      try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+      await Store.signOut();
+      currentUser = null;
+      $("#waiting-screen").classList.add("hidden");
+      $("#login-screen").classList.remove("hidden");
+      $("#login-error").textContent = "تم رفض طلب الدخول من قبل المدير";
+    }
+  }, 3000);
+}
+async function cancelWaiting() {
+  if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
+  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+  try { await Store.signOut(); } catch (e) {}
+  currentUser = null;
+  $("#waiting-screen").classList.add("hidden");
+  $("#login-screen").classList.remove("hidden");
+}
+
 function startApp() {
   $("#login-screen").classList.add("hidden");
+  $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#current-user").textContent =
     (currentUser.role === "manager" ? "المدير" : "الموظف") + ": " + currentUser.username;
 
   if (currentUser.role === "manager") {
+    document.querySelector('.tab[data-tab="requests"]').classList.remove("hidden");
     showOnlyView("manager-view");
     renderManager();
+    startRequestPolling();
   } else {
+    document.querySelector('.tab[data-tab="requests"]').classList.add("hidden");
     showOnlyView("employee-view");
     $("#employee-search").value = "";
     $("#employee-results").innerHTML =
       '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
   }
+}
+
+/* ---------- طلبات الدخول (جهة المدير) ---------- */
+function updateReqBadge(n) {
+  const b = $("#req-badge");
+  if (!b) return;
+  b.textContent = n;
+  b.classList.toggle("hidden", !n);
+}
+async function refreshRequests() {
+  if (!currentUser || currentUser.role !== "manager") return;
+  try { pendingRequests = await Store.listPendingLoginRequests(); } catch (e) { return; }
+  updateReqBadge(pendingRequests.length);
+  const tab = document.querySelector('.tab[data-tab="requests"]');
+  if (tab && tab.classList.contains("active")) renderRequestsTab();
+}
+function startRequestPolling() {
+  stopRequestPolling();
+  refreshRequests();
+  reqPollTimer = setInterval(refreshRequests, 5000);
+}
+function stopRequestPolling() {
+  if (reqPollTimer) { clearInterval(reqPollTimer); reqPollTimer = null; }
+  updateReqBadge(0);
+}
+function renderRequestsTab() {
+  const rows = pendingRequests.length ? pendingRequests.map((r) => `
+    <tr>
+      <td>${r.username || "—"}</td>
+      <td>${r.device || "—"}</td>
+      <td>${r.created_at ? fmtDateTime(r.created_at) : "—"}</td>
+      <td class="row-actions">
+        <button class="btn btn-success btn-sm" onclick="decideRequest(${r.id}, true)">موافقة</button>
+        <button class="btn btn-danger btn-sm" onclick="decideRequest(${r.id}, false)">رفض</button>
+      </td>
+    </tr>`).join("") : '<tr><td colspan="4" class="empty-msg">لا توجد طلبات دخول معلّقة.</td></tr>';
+  $("#tab-requests").innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">طلبات معلّقة</div>
+        <div class="stat-value">${pendingRequests.length.toLocaleString("ar-EG")}</div>
+      </div>
+    </div>
+    <p class="info-line">طلبات دخول الموظفين بانتظار موافقتك. تُحدَّث تلقائياً.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>المستخدم</th><th>الجهاز</th><th>وقت الطلب</th><th>القرار</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+async function decideRequest(id, approve) {
+  try {
+    await Store.decideLoginRequest(id, approve);
+    toast(approve ? "تمت الموافقة على الدخول" : "تم رفض الدخول");
+    await refreshRequests();
+  } catch (e) { toast(errMsg(e, "تعذّر تنفيذ القرار"), true); }
 }
 
 /* =========================================================
@@ -562,6 +704,7 @@ $$(".tab").forEach((tab) => {
     $$(".tab-panel").forEach((p) => p.classList.remove("active"));
     tab.classList.add("active");
     $("#tab-" + tab.dataset.tab).classList.add("active");
+    if (tab.dataset.tab === "requests") renderRequestsTab();
   });
 });
 
@@ -571,6 +714,7 @@ function renderManager() {
   renderMonthlyTab();
   renderStatementTab();
   renderCreditTab();
+  renderRequestsTab();
 }
 
 /* ---------- تبويب العملاء ---------- */

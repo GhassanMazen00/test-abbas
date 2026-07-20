@@ -49,6 +49,18 @@ alter table public.payments add column if not exists kind   text not null defaul
 create index if not exists bills_customer_idx    on public.bills(customer_id);
 create index if not exists payments_customer_idx on public.payments(customer_id);
 
+-- طلبات الدخول (موافقة المدير على دخول الموظفين) — انظر أيضاً login_requests.sql
+create table if not exists public.login_requests (
+  id         bigint generated always as identity primary key,
+  user_id    uuid references auth.users(id) on delete cascade,
+  username   text,
+  device     text,
+  status     text not null default 'pending' check (status in ('pending','approved','rejected')),
+  created_at timestamptz not null default now(),
+  decided_at timestamptz
+);
+create index if not exists login_requests_status_idx on public.login_requests(status);
+
 -- ---------- 2) دالة مساعدة: هل المستخدم الحالي مدير؟ ----------
 create or replace function public.is_manager()
 returns boolean
@@ -152,6 +164,18 @@ create policy payments_update on public.payments
 drop policy if exists payments_delete on public.payments;
 create policy payments_delete on public.payments
   for delete to authenticated using (public.is_manager());
+
+-- login_requests: كل مستخدم يُنشئ ويقرأ طلبه؛ المدير يقرأ الجميع ويوافق/يرفض
+alter table public.login_requests enable row level security;
+drop policy if exists login_requests_insert on public.login_requests;
+create policy login_requests_insert on public.login_requests
+  for insert to authenticated with check (user_id = auth.uid());
+drop policy if exists login_requests_select on public.login_requests;
+create policy login_requests_select on public.login_requests
+  for select to authenticated using (user_id = auth.uid() or public.is_manager());
+drop policy if exists login_requests_update on public.login_requests;
+create policy login_requests_update on public.login_requests
+  for update to authenticated using (public.is_manager());
 
 -- ---------- 5) (اختياري) أسماء العملاء التجريبية ----------
 -- احذف علامات التعليق إذا رغبت ببيانات مبدئية:
