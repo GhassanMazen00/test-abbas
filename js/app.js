@@ -460,7 +460,8 @@ function renderManager() {
 
 /* ---------- تبويب العملاء ---------- */
 function renderClientsTab() {
-  const totalOutstanding = DB.customers.reduce((s, c) => s + Math.max(balanceOf(c.id), 0), 0);
+  // صافي المستحق: يطرح أرصدة العملاء الدائنة (المدفوع مقدماً) ليطابق كشف الإجمالي
+  const totalOutstanding = DB.customers.reduce((s, c) => s + balanceOf(c.id), 0);
   const rows = DB.customers.map((c) => {
     const bal = balanceOf(c.id);
     const cls = bal > 0 ? "badge-danger" : "badge-success";
