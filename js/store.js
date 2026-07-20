@@ -188,9 +188,61 @@ const Store = (function () {
       }
       const { error } = await sb.from("login_requests").update({ status, decided_at: new Date().toISOString() }).eq("id", id);
       if (error) throw error;
+    },
+
+    /* ---------- إدخالات بانتظار المراجعة (worker1 → worker2) ---------- */
+    async createPendingEntry(kind, customerId, customerName, payload, createdBy) {
+      if (!useSupabase) {
+        const arr = peLoad();
+        const id = (arr.reduce((m, r) => Math.max(m, r.id), 0) || 0) + 1;
+        arr.push({ id, kind, customerId, customerName, payload, createdBy, status: "pending", created_at: new Date().toISOString() });
+        peSave(arr);
+        return { id };
+      }
+      const { data, error } = await sb.from("pending_entries")
+        .insert({ kind, customer_id: customerId, customer_name: customerName, payload, created_by: createdBy, status: "pending" })
+        .select().single();
+      if (error) throw error;
+      return { id: data.id };
+    },
+    async listPendingEntries() {
+      if (!useSupabase) return peLoad().filter((r) => r.status === "pending");
+      const { data, error } = await sb.from("pending_entries").select("*").eq("status", "pending").order("created_at");
+      if (error) throw error;
+      return data.map(mapPending);
+    },
+    async listRejectedEntries(createdBy) {
+      if (!useSupabase) return peLoad().filter((r) => r.status === "rejected" && (!createdBy || r.createdBy === createdBy));
+      let q = sb.from("pending_entries").select("*").eq("status", "rejected");
+      if (createdBy) q = q.eq("created_by", createdBy);
+      const { data, error } = await q.order("decided_at", { ascending: false });
+      if (error) throw error;
+      return data.map(mapPending);
+    },
+    async decidePendingEntry(id, approve, decidedBy) {
+      const status = approve ? "approved" : "rejected";
+      if (!useSupabase) {
+        const arr = peLoad(); const r = arr.find((x) => x.id === id);
+        if (r) { r.status = status; r.decided_by = decidedBy; r.decided_at = new Date().toISOString(); }
+        peSave(arr); return;
+      }
+      const { error } = await sb.from("pending_entries")
+        .update({ status, decided_by: decidedBy, decided_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
     }
   };
 
+  function mapPending(r) {
+    return {
+      id: r.id, kind: r.kind,
+      customerId: r.customer_id != null ? r.customer_id : r.customerId,
+      customerName: r.customer_name != null ? r.customer_name : r.customerName,
+      payload: r.payload || {}, createdBy: r.created_by != null ? r.created_by : r.createdBy,
+      status: r.status, created_at: r.created_at, decided_at: r.decided_at, decidedBy: r.decided_by
+    };
+  }
   function lrLoad() { try { return JSON.parse(localStorage.getItem("login_requests_v1") || "[]"); } catch (e) { return []; } }
   function lrSave(a) { try { localStorage.setItem("login_requests_v1", JSON.stringify(a)); } catch (e) {} }
+  function peLoad() { try { return JSON.parse(localStorage.getItem("pending_entries_v1") || "[]"); } catch (e) { return []; } }
+  function peSave(a) { try { localStorage.setItem("pending_entries_v1", JSON.stringify(a)); } catch (e) {} }
 })();
