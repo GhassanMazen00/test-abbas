@@ -676,10 +676,6 @@ function renderViewerProfile(custId) {
         <div class="stat-label">عدد الفواتير</div>
         <div class="stat-value">${bills.length.toLocaleString("ar-EG")}</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-label">إجمالي الفواتير</div>
-        <div class="stat-value">${fmtMoney(totalBills(custId))}</div>
-      </div>
     </div>
     <h4 class="nav-cards-title">الفواتير</h4>
     <div class="table-wrap">
