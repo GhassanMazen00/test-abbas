@@ -919,8 +919,61 @@ function renderManager() {
   renderDailyTab();
   renderMonthlyTab();
   renderStatementTab();
+  renderAllBillsTab();
   renderCreditTab();
   renderRequestsTab();
+}
+
+/* ---------- تبويب جميع الفواتير (بحث برقم الفاتورة أو اسم الصنف) ---------- */
+let allBillsQuery = "";
+function allBillsMatch(b, q, nq) {
+  if (b.docNo && String(b.docNo).includes(q)) return true;
+  if (("#" + b.id).includes(q) || String(b.id).includes(q)) return true;
+  return (b.items || []).some((it) => normSearch(it.description).includes(nq));
+}
+function allBillsRows() {
+  const q = allBillsQuery.trim();
+  if (!q) return '<tr><td colspan="6" class="empty-msg">اكتب رقم الفاتورة أو اسم الصنف للبحث.</td></tr>';
+  const nq = normSearch(q);
+  const matches = DB.bills.filter((b) => allBillsMatch(b, q, nq)).sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!matches.length) return '<tr><td colspan="6" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
+  const shown = matches.slice(0, 300);
+  let html = shown.map((b) => {
+    const cust = customerById(b.customerId);
+    return `
+      <tr class="clickable-row" onclick="openClientProfile(${b.customerId})">
+        <td class="num">${b.docNo ? b.docNo : ("#" + b.id)}</td>
+        <td>${fmtDate(b.date)}</td>
+        <td>${cust ? cust.name : "—"}</td>
+        <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+        <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
+        <td class="num">${fmtMoney(b.total)}</td>
+      </tr>`;
+  }).join("");
+  if (matches.length > shown.length) {
+    html += `<tr><td colspan="6" class="empty-msg">عرض ${shown.length.toLocaleString("ar-EG")} من ${matches.length.toLocaleString("ar-EG")} نتيجة — حدِّد البحث أكثر.</td></tr>`;
+  }
+  return html;
+}
+function renderAllBillsTab() {
+  const q = allBillsQuery.trim();
+  const count = q ? DB.bills.filter((b) => allBillsMatch(b, q, normSearch(q))).length : 0;
+  $("#tab-allbills").innerHTML = `
+    <div class="search-bar">
+      <input type="text" id="allbills-search" placeholder="ابحث برقم الفاتورة أو اسم الصنف..." value="${allBillsQuery.replace(/"/g, "&quot;")}" />
+    </div>
+    <p class="info-line">بحث في كل فواتير النظام (<b>${DB.bills.length.toLocaleString("ar-EG")}</b> فاتورة) حسب رقم الفاتورة أو اسم الصنف${q ? ` — <b>${count.toLocaleString("ar-EG")}</b> نتيجة` : ""}. اضغط على الفاتورة لفتح ملف العميل.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+        <tbody id="allbills-body">${allBillsRows()}</tbody>
+      </table>
+    </div>`;
+  const inp = $("#allbills-search");
+  if (inp) inp.oninput = () => {
+    allBillsQuery = inp.value;
+    $("#allbills-body").innerHTML = allBillsRows();
+  };
 }
 
 /* ---------- تبويب العملاء ---------- */
