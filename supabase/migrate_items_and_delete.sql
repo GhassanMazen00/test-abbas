@@ -6,10 +6,10 @@
 -- 1) عمود بنود المرتجع (ليكون المرتجع مطابقاً للفاتورة)
 alter table public.payments add column if not exists items jsonb default '[]'::jsonb;
 
--- 2) السماح للموظف بحذف إدخالاته المرفوضة
+-- 2) حذف الإدخالات المرفوضة من صلاحية المدير فقط
 drop policy if exists pending_entries_delete on public.pending_entries;
 create policy pending_entries_delete on public.pending_entries
-  for delete to authenticated using (true);
+  for delete to authenticated using (public.is_manager());
 
 -- =====================================================================
 --  انتهى.

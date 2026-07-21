@@ -602,32 +602,15 @@ function renderRejected() {
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
-      <td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteRejected(${e.id})">حذف</button></td>
-    </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+    </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
   $("#emp-rejected").innerHTML = `
-    <div class="section-head">
-      <p class="info-line" style="margin:0">إدخالات رفضها المراجِع. يمكنك إعادة إدخالها بشكل صحيح من تبويب «إضافة».</p>
-      ${rejectedEntries.length ? '<button class="btn btn-danger btn-sm" onclick="deleteAllRejected()">حذف الكل</button>' : ""}
-    </div>
+    <p class="info-line">إدخالات رفضها المراجِع. يمكنك إعادة إدخالها بشكل صحيح من تبويب «إضافة». (حذفها من صلاحية المدير)</p>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>وقت الرفض</th><th>حذف</th></tr></thead>
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>وقت الرفض</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
-}
-function deleteRejected(id) {
-  confirmDialog("حذف إدخال مرفوض", "هل تريد حذف هذا الإدخال المرفوض؟", async () => {
-    try { await Store.deletePendingEntry(id); toast("تم الحذف"); await refreshMaker(); }
-    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
-  }, { danger: true, yesLabel: "حذف" });
-}
-function deleteAllRejected() {
-  if (!rejectedEntries.length) return;
-  confirmDialog("حذف كل المرفوضات", "هل تريد حذف جميع الإدخالات المرفوضة؟ لا يمكن التراجع.", async () => {
-    try { await Store.deleteRejectedEntries(currentUser.username); toast("تم حذف الكل"); await refreshMaker(); }
-    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
-  }, { danger: true, yesLabel: "حذف الكل" });
 }
 async function refreshMaker() {
   if (!isMaker()) return;
@@ -1037,6 +1020,7 @@ $$("#manager-view .tab").forEach((tab) => {
     tab.classList.add("active");
     $("#tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "requests") renderRequestsTab();
+    if (tab.dataset.tab === "rejected") refreshManagerRejected();
   });
 });
 
@@ -1047,7 +1031,52 @@ function renderManager() {
   renderStatementTab();
   renderAllBillsTab();
   renderCreditTab();
+  renderRejectedTab();
   renderRequestsTab();
+}
+
+/* ---------- تبويب المرفوضات (المدير: حذف فقط) ---------- */
+let managerRejected = [];
+function renderRejectedTab() {
+  const rows = managerRejected.length ? managerRejected.map((e) => `
+    <tr class="clickable-row" onclick="showRejectedDetails(${e.id})">
+      <td>${entryKindBadge(e.kind)}</td>
+      <td>${e.customerName || "—"}</td>
+      <td>${entryDetail(e)}</td>
+      <td class="num">${fmtMoney(entryAmount(e))}</td>
+      <td>${e.createdBy || "—"}</td>
+      <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
+      <td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); mgrDeleteRejected(${e.id})">حذف</button></td>
+    </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+  $("#tab-rejected").innerHTML = `
+    <div class="section-head">
+      <p class="info-line" style="margin:0">الإدخالات التي رفضها المراجِع. حذفها من صلاحيتك وحدك.</p>
+      ${managerRejected.length ? '<button class="btn btn-danger btn-sm" onclick="mgrDeleteAllRejected()">حذف الكل</button>' : ""}
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>وقت الرفض</th><th>حذف</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+async function refreshManagerRejected() {
+  if (!currentUser || currentUser.role !== "manager") return;
+  try { managerRejected = await Store.listRejectedEntries(); } catch (e) { return; }
+  renderRejectedTab();
+}
+function mgrDeleteRejected(id) {
+  confirmDialog("حذف إدخال مرفوض", "هل تريد حذف هذا الإدخال المرفوض؟", async () => {
+    try { await Store.deletePendingEntry(id); toast("تم الحذف"); await refreshManagerRejected(); }
+    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  }, { danger: true, yesLabel: "حذف" });
+}
+function mgrDeleteAllRejected() {
+  if (!managerRejected.length) return;
+  confirmDialog("حذف كل المرفوضات", "هل تريد حذف جميع الإدخالات المرفوضة؟ لا يمكن التراجع.", async () => {
+    try { await Store.deleteRejectedEntries(); toast("تم حذف الكل"); await refreshManagerRejected(); }
+    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  }, { danger: true, yesLabel: "حذف الكل" });
 }
 
 /* ---------- تبويب جميع الفواتير (بحث برقم الفاتورة أو اسم الصنف) ---------- */
