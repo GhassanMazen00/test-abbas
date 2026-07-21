@@ -456,10 +456,62 @@ function entryDetail(e) {
   return `${doc}${e.payload.note ? " — " + e.payload.note : ""}`;
 }
 
+/* --------- تفاصيل إدخال (فاتورة/دفعة/مرتجع) --------- */
+function entryDetailBody(e) {
+  const meta = `<p class="info-line">المُدخِل: <b>${e.createdBy || "—"}</b> — الوقت: ${e.created_at ? fmtDateTime(e.created_at) : "—"}</p>`;
+  if (e.kind === "bill") {
+    const items = e.payload.items || [];
+    const rows = items.length ? items.map((it) => `
+      <tr>
+        <td>${it.description || "—"}</td>
+        <td class="num">${(Number(it.count) || 0).toLocaleString("ar-EG")}</td>
+        <td class="num">${fmtMoney(it.price)}</td>
+        <td class="num">${fmtMoney((Number(it.count) || 0) * (Number(it.price) || 0))}</td>
+      </tr>`).join("") : '<tr><td colspan="4" class="empty-msg">لا توجد أصناف.</td></tr>';
+    return `
+      <p class="info-line">العميل: <b>${e.customerName || "—"}</b> &nbsp;•&nbsp; رقم الفاتورة: <b>${e.payload.docNo || "—"}</b></p>
+      <div class="table-wrap"><table class="data">
+        <thead><tr><th>وصف الصنف</th><th>العدد</th><th>السعر</th><th>الإجمالي</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div class="bill-total-row"><span>المجموع الكلي</span><span class="num">${fmtMoney(e.payload.total || 0)}</span></div>
+      ${meta}`;
+  }
+  const word = e.kind === "return" ? "مرتجع" : "دفعة";
+  return `
+    <p class="info-line">العميل: <b>${e.customerName || "—"}</b></p>
+    <div class="detail-grid">
+      <div><span>النوع</span><b>${word}</b></div>
+      <div><span>القيمة</span><b>${fmtMoney(e.payload.amount || 0)}</b></div>
+      <div><span>الرقم</span><b>${e.payload.docNo || "—"}</b></div>
+      <div><span>ملاحظة</span><b>${e.payload.note || "—"}</b></div>
+    </div>
+    ${meta}`;
+}
+function entryTitle(e) {
+  return e.kind === "bill" ? "تفاصيل الفاتورة" : (e.kind === "return" ? "تفاصيل المرتجع" : "تفاصيل الدفعة");
+}
+function showEntryDetails(id) {
+  const e = findEntry(id);
+  if (!e) return;
+  openModal(entryTitle(e) + " — بانتظار المراجعة", entryDetailBody(e) + `
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="closeModal(); approveEntry(${e.id})">موافقة</button>
+      <button class="btn btn-danger" onclick="closeModal(); rejectEntry(${e.id})">رفض</button>
+      <button class="btn btn-outline" onclick="closeModal()">إغلاق</button>
+    </div>`);
+}
+function showRejectedDetails(id) {
+  const e = rejectedEntries.find((x) => x.id === id);
+  if (!e) return;
+  openModal(entryTitle(e) + " — مرفوض", entryDetailBody(e) + `
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">إغلاق</button></div>`);
+}
+
 /* --------- جهة المراجِع (worker2) --------- */
 function renderReview() {
   const rows = pendingEntries.length ? pendingEntries.map((e) => `
-    <tr>
+    <tr class="clickable-row" onclick="showEntryDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
       <td>${e.customerName || "—"}</td>
       <td>${entryDetail(e)}</td>
@@ -467,8 +519,9 @@ function renderReview() {
       <td>${e.createdBy || "—"}</td>
       <td>${e.created_at ? fmtDateTime(e.created_at) : "—"}</td>
       <td class="row-actions">
-        <button class="btn btn-success btn-sm" onclick="approveEntry(${e.id})">موافقة</button>
-        <button class="btn btn-danger btn-sm" onclick="rejectEntry(${e.id})">رفض</button>
+        <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); showEntryDetails(${e.id})">تفاصيل</button>
+        <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); approveEntry(${e.id})">موافقة</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); rejectEntry(${e.id})">رفض</button>
       </td>
     </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد إدخالات بانتظار المراجعة.</td></tr>';
   $("#review-content").innerHTML = `
@@ -531,7 +584,7 @@ function updateRejBadge(n) {
 }
 function renderRejected() {
   const rows = rejectedEntries.length ? rejectedEntries.map((e) => `
-    <tr>
+    <tr class="clickable-row" onclick="showRejectedDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
       <td>${e.customerName || "—"}</td>
       <td>${entryDetail(e)}</td>

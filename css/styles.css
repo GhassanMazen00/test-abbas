@@ -386,6 +386,14 @@ table.data tbody tr:hover td { background: var(--primary-soft); }
 .data th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 .data th.sortable:hover { color: var(--text); text-decoration: underline; }
 .nav-cell { color: var(--muted); font-weight: 600; text-align: left; white-space: nowrap; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.detail-grid > div {
+  display: flex; flex-direction: column; gap: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px;
+}
+.detail-grid span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.detail-grid b { font-size: 15px; }
 .filter-bar {
   display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 18px;
 }
