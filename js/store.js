@@ -17,7 +17,7 @@ const Store = (function () {
   /* تحويل صفوف الخادم إلى شكل التطبيق */
   const mapCustomer = (r) => ({ id: r.id, name: r.name });
   const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0, docNo: r.doc_no || "" });
-  const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment" });
+  const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment", items: r.items || [] });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -117,10 +117,12 @@ const Store = (function () {
       if (error) throw error;
       const bill = mapBill(data); DB.bills.push(bill); return bill;
     },
-    async updateBill(id, items, total, docNo) {
+    async updateBill(id, items, total, docNo, dateISO) {
       docNo = docNo || "";
-      if (useSupabase) { const { error } = await sb.from("bills").update({ items, total, doc_no: docNo }).eq("id", id); if (error) throw error; }
-      const bl = DB.bills.find((b) => b.id === id); if (bl) { bl.items = items; bl.total = total; bl.docNo = docNo; }
+      const patch = { items, total, doc_no: docNo };
+      if (dateISO) patch.created_at = dateISO;
+      if (useSupabase) { const { error } = await sb.from("bills").update(patch).eq("id", id); if (error) throw error; }
+      const bl = DB.bills.find((b) => b.id === id); if (bl) { bl.items = items; bl.total = total; bl.docNo = docNo; if (dateISO) bl.date = dateISO; }
       if (!useSupabase) saveDB(DB);
     },
     async deleteBill(id) {
@@ -130,21 +132,24 @@ const Store = (function () {
     },
 
     /* ---------- الدفعات ---------- */
-    async addPayment(customerId, amount, note, docNo, kind) {
-      docNo = docNo || ""; kind = kind || "payment";
+    async addPayment(customerId, amount, note, docNo, kind, items) {
+      docNo = docNo || ""; kind = kind || "payment"; items = items || [];
       if (!useSupabase) {
         DB.seq.payment++;
-        const pay = { id: DB.seq.payment, customerId, date: new Date().toISOString(), amount, note, docNo, kind };
+        const pay = { id: DB.seq.payment, customerId, date: new Date().toISOString(), amount, note, docNo, kind, items };
         DB.payments.push(pay); saveDB(DB); return pay;
       }
-      const { data, error } = await sb.from("payments").insert({ customer_id: customerId, amount, note, doc_no: docNo, kind }).select().single();
+      const { data, error } = await sb.from("payments").insert({ customer_id: customerId, amount, note, doc_no: docNo, kind, items }).select().single();
       if (error) throw error;
       const pay = mapPayment(data); DB.payments.push(pay); return pay;
     },
-    async updatePayment(id, amount, note, docNo) {
+    async updatePayment(id, amount, note, docNo, dateISO, items) {
       docNo = docNo || "";
-      if (useSupabase) { const { error } = await sb.from("payments").update({ amount, note, doc_no: docNo }).eq("id", id); if (error) throw error; }
-      const py = DB.payments.find((p) => p.id === id); if (py) { py.amount = amount; py.note = note; py.docNo = docNo; }
+      const patch = { amount, note, doc_no: docNo };
+      if (dateISO) patch.created_at = dateISO;
+      if (items !== undefined) patch.items = items;
+      if (useSupabase) { const { error } = await sb.from("payments").update(patch).eq("id", id); if (error) throw error; }
+      const py = DB.payments.find((p) => p.id === id); if (py) { py.amount = amount; py.note = note; py.docNo = docNo; if (dateISO) py.date = dateISO; if (items !== undefined) py.items = items; }
       if (!useSupabase) saveDB(DB);
     },
     async deletePayment(id) {
@@ -228,6 +233,21 @@ const Store = (function () {
       }
       const { error } = await sb.from("pending_entries")
         .update({ status, decided_by: decidedBy, decided_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    },
+    async deletePendingEntry(id) {
+      if (!useSupabase) { peSave(peLoad().filter((x) => x.id !== id)); return; }
+      const { error } = await sb.from("pending_entries").delete().eq("id", id);
+      if (error) throw error;
+    },
+    async deleteRejectedEntries(createdBy) {
+      if (!useSupabase) {
+        peSave(peLoad().filter((x) => !(x.status === "rejected" && (!createdBy || x.createdBy === createdBy))));
+        return;
+      }
+      let q = sb.from("pending_entries").delete().eq("status", "rejected");
+      if (createdBy) q = q.eq("created_by", createdBy);
+      const { error } = await q;
       if (error) throw error;
     }
   };

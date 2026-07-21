@@ -32,6 +32,9 @@ create policy pending_entries_select on public.pending_entries
 drop policy if exists pending_entries_update on public.pending_entries;
 create policy pending_entries_update on public.pending_entries
   for update to authenticated using (true);
+drop policy if exists pending_entries_delete on public.pending_entries;
+create policy pending_entries_delete on public.pending_entries
+  for delete to authenticated using (true);
 
 -- =====================================================================
 --  انتهى. بعد تشغيله: إدخالات worker1 تذهب لمراجعة worker2.
