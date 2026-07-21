@@ -38,6 +38,7 @@ create table if not exists public.payments (
   note        text default '',
   doc_no      text default '',              -- رقم الدفعة
   kind        text not null default 'payment' check (kind in ('payment','transfer','discount','return')),
+  items       jsonb default '[]'::jsonb,       -- بنود المرتجع (مطابقة للفاتورة)
   created_at  timestamptz not null default now()
 );
 
@@ -45,6 +46,7 @@ create table if not exists public.payments (
 alter table public.bills    add column if not exists doc_no text default '';
 alter table public.payments add column if not exists doc_no text default '';
 alter table public.payments add column if not exists kind   text not null default 'payment';
+alter table public.payments add column if not exists items  jsonb default '[]'::jsonb;
 
 create index if not exists bills_customer_idx    on public.bills(customer_id);
 create index if not exists payments_customer_idx on public.payments(customer_id);
@@ -203,6 +205,9 @@ create policy pending_entries_select on public.pending_entries
 drop policy if exists pending_entries_update on public.pending_entries;
 create policy pending_entries_update on public.pending_entries
   for update to authenticated using (true);
+drop policy if exists pending_entries_delete on public.pending_entries;
+create policy pending_entries_delete on public.pending_entries
+  for delete to authenticated using (true);
 
 -- ---------- 5) (اختياري) أسماء العملاء التجريبية ----------
 -- احذف علامات التعليق إذا رغبت ببيانات مبدئية:
