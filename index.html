@@ -15,7 +15,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="css/styles.css?v=2026072014" />
+  <link rel="stylesheet" href="css/styles.css?v=2026072015" />
 </head>
 <body>
 
@@ -85,6 +85,26 @@
         </div>
 
         <div id="emp-rejected" class="emp-panel hidden"></div>
+      </div>
+    </main>
+
+    <!-- ===================== واجهة الاطّلاع فقط (worker3) ===================== -->
+    <main id="viewer-view" class="view hidden">
+      <div class="container">
+        <div id="viewer-search-panel">
+          <div class="section-head">
+            <h2 class="page-title" style="margin:0">البحث عن عميل</h2>
+          </div>
+          <div class="search-bar">
+            <input type="text" id="viewer-search" placeholder="اكتب اسم العميل ثم اضغط بحث..." />
+            <button id="viewer-search-btn" class="btn btn-primary">بحث</button>
+          </div>
+          <div id="viewer-results" class="results"></div>
+        </div>
+        <div id="viewer-profile-panel" class="hidden">
+          <button class="btn btn-outline btn-back" onclick="viewerBackToSearch()">↩ العودة إلى البحث</button>
+          <div id="viewer-profile-content"></div>
+        </div>
       </div>
     </main>
 
@@ -169,9 +189,9 @@
   <div id="toast" class="toast hidden"></div>
 
   <script src="js/vendor/supabase.js"></script>
-  <script src="js/config.js?v=2026072014"></script>
-  <script src="js/data.js?v=2026072014"></script>
-  <script src="js/store.js?v=2026072014"></script>
-  <script src="js/app.js?v=2026072014"></script>
+  <script src="js/config.js?v=2026072015"></script>
+  <script src="js/data.js?v=2026072015"></script>
+  <script src="js/store.js?v=2026072015"></script>
+  <script src="js/app.js?v=2026072015"></script>
 </body>
 </html>

@@ -29,7 +29,8 @@ const USERS = {
   "موظف":   { password: "1234", role: "employee", name: "الموظف" },
   "مدير":   { password: "1234", role: "manager",  name: "المدير" },
   "worker1": { password: "1234", role: "employee", name: "الموظف الأول" },
-  "worker2": { password: "1234", role: "employee", name: "المراجِع" }
+  "worker2": { password: "1234", role: "employee", name: "المراجِع" },
+  "worker3": { password: "1234", role: "employee", name: "مطّلِع" }
 };
 
 /* تهيئة قاعدة البيانات لأول مرة */
