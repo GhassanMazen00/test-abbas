@@ -10,8 +10,10 @@ let currentUser = null;
 
 /* ---------- الأدوار ---------- */
 const REVIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.REVIEWER_USERNAME) || "worker2";
+const VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.VIEWER_USERNAME) || "worker3";
 function isReviewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === REVIEWER_USERNAME; }
-function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME; }
+function isViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === VIEWER_USERNAME; }
+function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME; }
 
 /* ---------- أدوات مساعدة ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -177,7 +179,7 @@ function openMonthBills(key) {
 
 /* إظهار واجهة واحدة فقط من واجهات التطبيق */
 function showOnlyView(viewId) {
-  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view"].forEach((v) => {
+  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view", "viewer-view"].forEach((v) => {
     const el = document.getElementById(v);
     if (el) el.classList.toggle("hidden", v !== viewId);
   });
@@ -411,7 +413,7 @@ function startApp() {
   $("#login-screen").classList.add("hidden");
   $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  const roleLabel = currentUser.role === "manager" ? "المدير" : (isReviewer() ? "المراجِع" : "الموظف");
+  const roleLabel = currentUser.role === "manager" ? "المدير" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : "الموظف"));
   $("#current-user").textContent = roleLabel + ": " + currentUser.username;
 
   if (currentUser.role === "manager") {
@@ -423,6 +425,11 @@ function startApp() {
     showOnlyView("review-view");
     renderReview();
     startReviewPolling();
+  } else if (isViewer()) {
+    showOnlyView("viewer-view");
+    viewerBackToSearch();
+    $("#viewer-search").value = "";
+    $("#viewer-results").innerHTML = '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
   } else {
     showOnlyView("employee-view");
     empShow("add");
@@ -608,6 +615,85 @@ async function refreshMaker() {
 }
 function startMakerPolling() { stopMakerPolling(); refreshMaker(); makerPollTimer = setInterval(refreshMaker, 6000); }
 function stopMakerPolling() { if (makerPollTimer) { clearInterval(makerPollTimer); makerPollTimer = null; } }
+
+/* =========================================================
+   واجهة الاطّلاع فقط (worker3): بحث + رصيد وفواتير دون تعديل/حذف
+   ========================================================= */
+function doViewerSearch() {
+  const q = $("#viewer-search").value.trim();
+  const box = $("#viewer-results");
+  if (!q) { box.innerHTML = '<p class="empty-msg">الرجاء كتابة اسم العميل للبحث.</p>'; return; }
+  const matches = matchCustomers(q);
+  if (!matches.length) { box.innerHTML = '<p class="empty-msg">لا يوجد عميل بهذا الاسم.</p>'; return; }
+  box.innerHTML = matches.map((c) => `
+    <div class="result-card clickable-row" onclick="openViewerProfile(${c.id})">
+      <div class="result-name">${c.name}</div>
+      <div class="result-actions"><span class="nav-cell">عرض ›</span></div>
+    </div>`).join("");
+}
+function viewerBackToSearch() {
+  $("#viewer-profile-panel").classList.add("hidden");
+  $("#viewer-search-panel").classList.remove("hidden");
+}
+function openViewerProfile(custId) {
+  renderViewerProfile(custId);
+  $("#viewer-search-panel").classList.add("hidden");
+  $("#viewer-profile-panel").classList.remove("hidden");
+  window.scrollTo(0, 0);
+}
+function renderViewerProfile(custId) {
+  const c = customerById(custId);
+  if (!c) return;
+  const bal = balanceOf(custId);
+  const balCls = bal > 0 ? "pos" : "zero";
+  const statusBadge = bal > 0
+    ? '<span class="badge badge-danger">مستحق عليه</span>'
+    : '<span class="badge badge-success">مسدَّد بالكامل</span>';
+  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const rows = bills.length ? bills.map((b) => `
+    <tr>
+      <td class="num">${docCell(b.docNo)}</td>
+      <td>${fmtDate(b.date)}</td>
+      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
+      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
+      <td class="num">${fmtMoney(b.total)}</td>
+    </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد فواتير.</td></tr>';
+  $("#viewer-profile-content").innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div>
+        <h2 class="profile-name">${c.name}</h2>
+        <div class="profile-meta">${statusBadge}</div>
+      </div>
+    </div>
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">الرصيد المستحق</div>
+        <div class="stat-value ${balCls}">${fmtMoney(bal)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">عدد الفواتير</div>
+        <div class="stat-value">${bills.length.toLocaleString("ar-EG")}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">إجمالي الفواتير</div>
+        <div class="stat-value">${fmtMoney(totalBills(custId))}</div>
+      </div>
+    </div>
+    <h4 class="nav-cards-title">الفواتير</h4>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+(function () {
+  const btn = $("#viewer-search-btn"), inp = $("#viewer-search");
+  if (btn) btn.addEventListener("click", doViewerSearch);
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doViewerSearch(); });
+})();
 
 /* ---------- طلبات الدخول (جهة المدير) ---------- */
 function updateReqBadge(n) {
