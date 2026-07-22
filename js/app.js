@@ -1601,7 +1601,8 @@ function renderBillsPage(custId) {
       <td>#${b.id}</td>
       <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDateTime(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
@@ -1610,7 +1611,7 @@ function renderBillsPage(custId) {
         <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
       </td>
     </tr>`).join("") :
-    '<tr><td colspan="8" class="empty-msg">لا توجد فواتير.</td></tr>';
+    '<tr><td colspan="9" class="empty-msg">لا توجد فواتير.</td></tr>';
   return `
     ${subpageHeader(custId, "الفواتير")}
     <div class="section-head">
@@ -1619,7 +1620,7 @@ function renderBillsPage(custId) {
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
