@@ -680,11 +680,20 @@ function viewerBackToSearch() {
   $("#viewer-profile-panel").classList.add("hidden");
   $("#viewer-search-panel").classList.remove("hidden");
 }
+let viewerTab = "bills";
 function openViewerProfile(custId) {
+  viewerTab = "bills";
   renderViewerProfile(custId);
   $("#viewer-search-panel").classList.add("hidden");
   $("#viewer-profile-panel").classList.remove("hidden");
   window.scrollTo(0, 0);
+}
+function viewerShow(which) {
+  viewerTab = which;
+  const bills = $("#vp-bills"), pays = $("#vp-pays");
+  if (bills) bills.classList.toggle("hidden", which !== "bills");
+  if (pays) pays.classList.toggle("hidden", which !== "pays");
+  $$('#viewer-profile-content .tab').forEach((t) => t.classList.toggle("active", t.dataset.vtab === which));
 }
 function renderViewerProfile(custId) {
   const c = customerById(custId);
@@ -695,15 +704,31 @@ function renderViewerProfile(custId) {
     ? '<span class="badge badge-danger">مستحق عليه</span>'
     : '<span class="badge badge-success">مسدَّد بالكامل</span>';
   const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const rows = bills.length ? bills.map((b) => `
+  const billRows = bills.length ? bills.map((b) => `
     <tr>
       <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDate(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
-    </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد فواتير.</td></tr>';
+    </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد فواتير.</td></tr>';
+  const payments = paymentsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const payRows = payments.length ? payments.map((p) => {
+    const isRet = kindOf(p) === "return";
+    const desc = (isRet && p.items && p.items.length)
+      ? p.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
+      : (p.note || "—");
+    return `
+    <tr>
+      <td class="num">${docCell(p.docNo)}</td>
+      <td>${fmtDate(p.date)}</td>
+      <td>${kindBadge(kindOf(p))}</td>
+      <td class="num">${fmtMoney(p.amount)}</td>
+      <td>${desc}</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد حركات.</td></tr>';
   $("#viewer-profile-content").innerHTML = `
     <div class="profile-header">
       <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
@@ -722,12 +747,25 @@ function renderViewerProfile(custId) {
         <div class="stat-value">${bills.length.toLocaleString("ar-EG")}</div>
       </div>
     </div>
-    <h4 class="nav-cards-title">الفواتير</h4>
-    <div class="table-wrap">
-      <table class="data">
-        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+    <nav class="tabs">
+      <button class="tab ${viewerTab === "bills" ? "active" : ""}" data-vtab="bills" onclick="viewerShow('bills')">الفواتير</button>
+      <button class="tab ${viewerTab === "pays" ? "active" : ""}" data-vtab="pays" onclick="viewerShow('pays')">الدفعات والحركات</button>
+    </nav>
+    <div id="vp-bills" class="${viewerTab === "bills" ? "" : "hidden"}">
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
+          <tbody>${billRows}</tbody>
+        </table>
+      </div>
+    </div>
+    <div id="vp-pays" class="${viewerTab === "pays" ? "" : "hidden"}">
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>رقم الدفعة</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>البيان</th></tr></thead>
+          <tbody>${payRows}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 (function () {
