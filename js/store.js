@@ -249,8 +249,54 @@ const Store = (function () {
       if (createdBy) q = q.eq("created_by", createdBy);
       const { error } = await q;
       if (error) throw error;
+    },
+
+    /* ---------- الجلسات النشطة (إدارة المستخدمين) ---------- */
+    async createSession(userId, username, device) {
+      if (!useSupabase) {
+        const arr = asLoad();
+        const id = (arr.reduce((m, r) => Math.max(m, r.id), 0) || 0) + 1;
+        arr.push({ id, userId, username, device, last_seen: new Date().toISOString(), signed_out: false });
+        asSave(arr); return { id };
+      }
+      const { data, error } = await sb.from("active_sessions")
+        .insert({ user_id: userId, username, device, last_seen: new Date().toISOString(), signed_out: false }).select().single();
+      if (error) throw error;
+      return { id: data.id };
+    },
+    async heartbeatSession(id) {
+      if (!useSupabase) { const arr = asLoad(); const r = arr.find((x) => x.id === id); if (r) r.last_seen = new Date().toISOString(); asSave(arr); return; }
+      const { error } = await sb.from("active_sessions").update({ last_seen: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+    },
+    async getSessionState(id) {
+      if (!useSupabase) { const r = asLoad().find((x) => x.id === id); return r ? (r.signed_out ? "signed_out" : "active") : "gone"; }
+      const { data, error } = await sb.from("active_sessions").select("signed_out").eq("id", id).maybeSingle();
+      if (error) throw error;
+      if (!data) return "gone";
+      return data.signed_out ? "signed_out" : "active";
+    },
+    async listActiveSessions() {
+      const cutoff = new Date(Date.now() - 90000).toISOString();
+      if (!useSupabase) { return asLoad().filter((r) => !r.signed_out && r.last_seen > cutoff).sort((a, b) => b.last_seen.localeCompare(a.last_seen)); }
+      const { data, error } = await sb.from("active_sessions").select("*").eq("signed_out", false).gte("last_seen", cutoff).order("last_seen", { ascending: false });
+      if (error) throw error;
+      return data.map((r) => ({ id: r.id, userId: r.user_id, username: r.username, device: r.device, last_seen: r.last_seen }));
+    },
+    async forceSignOut(id) {
+      if (!useSupabase) { const arr = asLoad(); const r = arr.find((x) => x.id === id); if (r) r.signed_out = true; asSave(arr); return; }
+      const { error } = await sb.from("active_sessions").update({ signed_out: true }).eq("id", id);
+      if (error) throw error;
+    },
+    async endSession(id) {
+      if (!useSupabase) { asSave(asLoad().filter((x) => x.id !== id)); return; }
+      const { error } = await sb.from("active_sessions").delete().eq("id", id);
+      if (error) throw error;
     }
   };
+
+  function asLoad() { try { return JSON.parse(localStorage.getItem("active_sessions_v1") || "[]"); } catch (e) { return []; } }
+  function asSave(a) { try { localStorage.setItem("active_sessions_v1", JSON.stringify(a)); } catch (e) {} }
 
   function mapPending(r) {
     return {
