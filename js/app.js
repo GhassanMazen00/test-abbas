@@ -138,6 +138,18 @@ function matchCustomers(query) {
   scored.sort((a, b) => a.s - b.s || a.c.name.localeCompare(b.c.name, "ar"));
   return scored.map((x) => x.c);
 }
+/* مطابقة فاتورة: رقم الفاتورة/الكشف أو المقاس أو اسم الصنف */
+function billMatchesQuery(b, q) {
+  const raw = (q || "").trim();
+  if (!raw) return true;
+  const nq = normSearch(raw);
+  if (b.docNo && String(b.docNo).includes(raw)) return true;
+  if (("#" + b.id).includes(raw) || String(b.id).includes(raw)) return true;
+  return (b.items || []).some((it) =>
+    normSearch(it.description).includes(nq) ||
+    (it.size && (String(it.size).includes(raw) || normSearch(it.size).includes(nq)))
+  );
+}
 
 /* =========================================================
    نافذة تفاصيل الفواتير (لليوم/الشهر) — أعمدة مختصرة فقط
@@ -681,8 +693,33 @@ function viewerBackToSearch() {
   $("#viewer-search-panel").classList.remove("hidden");
 }
 let viewerTab = "bills";
+let viewerBillsQuery = "";
+let viewerProfileId = null;
+function viewerBillRows(custId) {
+  const bills = billsOf(custId).slice()
+    .filter((b) => billMatchesQuery(b, viewerBillsQuery))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!bills.length) return '<tr><td colspan="7" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
+  return bills.map((b) => `
+    <tr>
+      <td class="num">${docCell(b.docNo)}</td>
+      <td>${fmtDate(b.date)}</td>
+      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
+      <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
+      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
+      <td class="num">${fmtMoney(b.total)}</td>
+    </tr>`).join("");
+}
+function viewerBillsInput(val) {
+  viewerBillsQuery = val;
+  const tb = $("#vp-bills-body");
+  if (tb) tb.innerHTML = viewerBillRows(viewerProfileId);
+}
 function openViewerProfile(custId) {
   viewerTab = "bills";
+  viewerBillsQuery = "";
+  viewerProfileId = custId;
   renderViewerProfile(custId);
   $("#viewer-search-panel").classList.add("hidden");
   $("#viewer-profile-panel").classList.remove("hidden");
@@ -703,17 +740,7 @@ function renderViewerProfile(custId) {
   const statusBadge = bal > 0
     ? '<span class="badge badge-danger">مستحق عليه</span>'
     : '<span class="badge badge-success">مسدَّد بالكامل</span>';
-  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const billRows = bills.length ? bills.map((b) => `
-    <tr>
-      <td class="num">${docCell(b.docNo)}</td>
-      <td>${fmtDate(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
-      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
-      <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
-      <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
-      <td class="num">${fmtMoney(b.total)}</td>
-    </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد فواتير.</td></tr>';
+  const bills = billsOf(custId);
   const payments = paymentsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
   const payRows = payments.length ? payments.map((p) => {
     const isRet = kindOf(p) === "return";
@@ -752,10 +779,13 @@ function renderViewerProfile(custId) {
       <button class="tab ${viewerTab === "pays" ? "active" : ""}" data-vtab="pays" onclick="viewerShow('pays')">الدفعات والحركات</button>
     </nav>
     <div id="vp-bills" class="${viewerTab === "bills" ? "" : "hidden"}">
+      <div class="search-bar">
+        <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${viewerBillsQuery.replace(/"/g, "&quot;")}" oninput="viewerBillsInput(this.value)" />
+      </div>
       <div class="table-wrap">
         <table class="data">
           <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
-          <tbody>${billRows}</tbody>
+          <tbody id="vp-bills-body">${viewerBillRows(custId)}</tbody>
         </table>
       </div>
     </div>
@@ -1609,6 +1639,7 @@ function backToManager() {
 /* ---------- الصفحات الفرعية للعميل ---------- */
 function openSubpage(custId, type) {
   currentSub = { custId, type };
+  if (type === "bills") billsSearchQuery = "";
   $("#subpage-content").innerHTML = subpageHTML(custId, type);
   showOnlyView("subpage-view");
   window.scrollTo(0, 0);
@@ -1632,9 +1663,13 @@ function subpageHeader(custId, title) {
 }
 
 /* --- صفحة الفواتير (مع تعديل/حذف) --- */
-function renderBillsPage(custId) {
-  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const rows = bills.length ? bills.map((b) => `
+let billsSearchQuery = "";
+function billsPageRows(custId) {
+  const bills = billsOf(custId).slice()
+    .filter((b) => billMatchesQuery(b, billsSearchQuery))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!bills.length) return '<tr><td colspan="9" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
+  return bills.map((b) => `
     <tr>
       <td>#${b.id}</td>
       <td class="num">${docCell(b.docNo)}</td>
@@ -1648,18 +1683,28 @@ function renderBillsPage(custId) {
         <button class="btn btn-outline btn-sm" onclick="openBillForm(${custId}, ${b.id})">تعديل</button>
         <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
       </td>
-    </tr>`).join("") :
-    '<tr><td colspan="9" class="empty-msg">لا توجد فواتير.</td></tr>';
+    </tr>`).join("");
+}
+function billsSearchInput(custId, val) {
+  billsSearchQuery = val;
+  const tb = $("#bills-body");
+  if (tb) tb.innerHTML = billsPageRows(custId);
+}
+function renderBillsPage(custId) {
+  const count = billsOf(custId).length;
   return `
     ${subpageHeader(custId, "الفواتير")}
     <div class="section-head">
-      <p class="info-line" style="margin:0">إجمالي الفواتير: <b>${fmtMoney(totalBills(custId))}</b> — العدد: <b>${bills.length.toLocaleString("ar-EG")}</b></p>
+      <p class="info-line" style="margin:0">إجمالي الفواتير: <b>${fmtMoney(totalBills(custId))}</b> — العدد: <b>${count.toLocaleString("ar-EG")}</b></p>
       <button class="btn btn-primary btn-sm" onclick="openBillForm(${custId})">+ إضافة فاتورة</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${billsSearchQuery.replace(/"/g, "&quot;")}" oninput="billsSearchInput(${custId}, this.value)" />
     </div>
     <div class="table-wrap">
       <table class="data">
         <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody id="bills-body">${billsPageRows(custId)}</tbody>
       </table>
     </div>`;
 }
