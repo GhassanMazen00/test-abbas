@@ -350,12 +350,51 @@ $("#logout-btn").addEventListener("click", async () => {
   stopRequestPolling();
   stopReviewPolling();
   stopMakerPolling();
+  stopSessionTracking();
+  try { if (sessionId != null) await Store.endSession(sessionId); } catch (e) {}
+  sessionId = null;
   try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
   await Store.signOut();
   currentUser = null;
   $("#app").classList.add("hidden");
   $("#login-screen").classList.remove("hidden");
 });
+
+/* ---------- تتبّع الجلسة (من مسجّل الآن + تسجيل خروج إجباري) ---------- */
+let sessionId = null, hbTimer = null, sessSelfTimer = null;
+async function startSessionTracking() {
+  try {
+    const r = await Store.createSession(currentUser.userId, currentUser.username, deviceInfo());
+    sessionId = r && r.id;
+  } catch (e) { sessionId = null; return; } // جدول الجلسات غير موجود → تجاهل بأمان
+  if (sessionId == null) return;
+  if (hbTimer) clearInterval(hbTimer);
+  if (sessSelfTimer) clearInterval(sessSelfTimer);
+  hbTimer = setInterval(() => { Store.heartbeatSession(sessionId).catch(() => {}); }, 25000);
+  sessSelfTimer = setInterval(checkOwnSession, 10000);
+}
+function stopSessionTracking() {
+  if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+  if (sessSelfTimer) { clearInterval(sessSelfTimer); sessSelfTimer = null; }
+}
+async function checkOwnSession() {
+  if (sessionId == null) return;
+  let st;
+  try { st = await Store.getSessionState(sessionId); } catch (e) { return; }
+  if (st === "signed_out" || st === "gone") await forcedLogout();
+}
+async function forcedLogout() {
+  stopSessionTracking();
+  stopRequestPolling(); stopReviewPolling(); stopMakerPolling();
+  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+  try { if (sessionId != null) await Store.endSession(sessionId); } catch (e) {}
+  sessionId = null;
+  try { await Store.signOut(); } catch (e) {}
+  currentUser = null;
+  $("#app").classList.add("hidden");
+  $("#login-screen").classList.remove("hidden");
+  $("#login-error").textContent = "تم تسجيل خروجك بواسطة المدير";
+}
 
 /* استعادة الجلسة تلقائياً في وضع الخادم (بدون إعادة تسجيل دخول) */
 (async function restoreSession() {
@@ -439,6 +478,7 @@ function startApp() {
       '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
     startMakerPolling();
   }
+  startSessionTracking();
 }
 
 /* =========================================================
@@ -712,8 +752,8 @@ async function refreshRequests() {
 }
 function startRequestPolling() {
   stopRequestPolling();
-  refreshRequests();
-  reqPollTimer = setInterval(refreshRequests, 5000);
+  refreshRequests(); refreshUsers();
+  reqPollTimer = setInterval(() => { refreshRequests(); refreshUsers(); }, 5000);
 }
 function stopRequestPolling() {
   if (reqPollTimer) { clearInterval(reqPollTimer); reqPollTimer = null; }
@@ -1021,6 +1061,7 @@ $$("#manager-view .tab").forEach((tab) => {
     $("#tab-" + tab.dataset.tab).classList.add("active");
     if (tab.dataset.tab === "requests") renderRequestsTab();
     if (tab.dataset.tab === "rejected") refreshManagerRejected();
+    if (tab.dataset.tab === "users") { renderUsersTab(); refreshUsers(); }
   });
 });
 
@@ -1033,6 +1074,47 @@ function renderManager() {
   renderCreditTab();
   renderRejectedTab();
   renderRequestsTab();
+  renderUsersTab();
+}
+
+/* ---------- تبويب المستخدمون (من متصل الآن + تسجيل خروج) ---------- */
+let activeSessions = [];
+function renderUsersTab() {
+  const rows = activeSessions.length ? activeSessions.map((s) => {
+    const me = currentUser && s.userId === currentUser.userId;
+    return `<tr>
+      <td>${s.username || "—"}${me ? ' <span class="badge badge-success">أنت</span>' : ""}</td>
+      <td>${s.device || "—"}</td>
+      <td>${s.last_seen ? fmtDateTime(s.last_seen) : "—"}</td>
+      <td class="row-actions">${me ? "—" : `<button class="btn btn-danger btn-sm" onclick="logoutUser(${s.id})">تسجيل الخروج</button>`}</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="4" class="empty-msg">لا يوجد مستخدمون متصلون حالياً.</td></tr>';
+  $("#tab-users").innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">المتصلون الآن</div>
+        <div class="stat-value">${activeSessions.length.toLocaleString("ar-EG")}</div>
+      </div>
+    </div>
+    <p class="info-line">المستخدمون المتصلون حالياً وأجهزتهم. يمكنك تسجيل خروج أي مستخدم (سيخرج خلال ثوانٍ). يُحدَّث تلقائياً.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>المستخدم</th><th>الجهاز</th><th>آخر نشاط</th><th>الإجراء</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+async function refreshUsers() {
+  if (!currentUser || currentUser.role !== "manager") return;
+  try { activeSessions = await Store.listActiveSessions(); } catch (e) { return; }
+  const tab = document.querySelector('.tab[data-tab="users"]');
+  if (tab && tab.classList.contains("active")) renderUsersTab();
+}
+function logoutUser(id) {
+  confirmDialog("تسجيل خروج مستخدم", "هل تريد تسجيل خروج هذا المستخدم؟ سيخرج من التطبيق خلال ثوانٍ.", async () => {
+    try { await Store.forceSignOut(id); toast("تم إرسال أمر تسجيل الخروج"); await refreshUsers(); }
+    catch (e) { toast(errMsg(e, "تعذّر تسجيل الخروج"), true); }
+  }, { danger: true, yesLabel: "تسجيل الخروج" });
 }
 
 /* ---------- تبويب المرفوضات (المدير: حذف فقط) ---------- */
