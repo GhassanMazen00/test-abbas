@@ -18,6 +18,7 @@ const Store = (function () {
   const mapCustomer = (r) => ({ id: r.id, name: r.name });
   const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0, docNo: r.doc_no || "" });
   const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment", items: r.items || [] });
+  const mapCancelled = (r) => ({ id: r.id, docNo: r.doc_no || "", customerName: r.customer_name || "", items: r.items || [], total: Number(r.total) || 0, reason: r.reason || "", date: r.created_at });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -80,6 +81,9 @@ const Store = (function () {
       DB.customers = c.map(mapCustomer);
       DB.bills = b.map(mapBill);
       DB.payments = p.map(mapPayment);
+      // الفواتير الملغية (للمدير فقط) — منفصلة تماماً؛ آمنة إن لم يوجد الجدول
+      DB.cancelled = [];
+      try { DB.cancelled = (await this.fetchAllRows("cancelled_invoices")).map(mapCancelled); } catch (e) { DB.cancelled = []; }
     },
 
     /* ---------- العملاء ---------- */
@@ -155,6 +159,36 @@ const Store = (function () {
     async deletePayment(id) {
       if (useSupabase) { const { error } = await sb.from("payments").delete().eq("id", id); if (error) throw error; }
       DB.payments = DB.payments.filter((p) => p.id !== id);
+      if (!useSupabase) saveDB(DB);
+    },
+
+    /* ---------- الفواتير الملغية (منفصلة تماماً) ---------- */
+    async addCancelledInvoice(docNo, customerName, items, total, reason, dateISO) {
+      docNo = docNo || ""; customerName = customerName || ""; items = items || []; reason = reason || "";
+      if (!useSupabase) {
+        if (!DB.seq.cancelled) DB.seq.cancelled = 0;
+        DB.seq.cancelled++;
+        const rec = { id: DB.seq.cancelled, docNo, customerName, items, total, reason, date: dateISO || new Date().toISOString() };
+        DB.cancelled.push(rec); saveDB(DB); return rec;
+      }
+      const payload = { doc_no: docNo, customer_name: customerName, items, total, reason };
+      if (dateISO) payload.created_at = dateISO;
+      const { data, error } = await sb.from("cancelled_invoices").insert(payload).select().single();
+      if (error) throw error;
+      const rec = mapCancelled(data); DB.cancelled.push(rec); return rec;
+    },
+    async updateCancelledInvoice(id, docNo, customerName, items, total, reason, dateISO) {
+      docNo = docNo || ""; customerName = customerName || ""; items = items || []; reason = reason || "";
+      const patch = { doc_no: docNo, customer_name: customerName, items, total, reason };
+      if (dateISO) patch.created_at = dateISO;
+      if (useSupabase) { const { error } = await sb.from("cancelled_invoices").update(patch).eq("id", id); if (error) throw error; }
+      const rec = DB.cancelled.find((x) => x.id === id);
+      if (rec) { rec.docNo = docNo; rec.customerName = customerName; rec.items = items; rec.total = total; rec.reason = reason; if (dateISO) rec.date = dateISO; }
+      if (!useSupabase) saveDB(DB);
+    },
+    async deleteCancelledInvoice(id) {
+      if (useSupabase) { const { error } = await sb.from("cancelled_invoices").delete().eq("id", id); if (error) throw error; }
+      DB.cancelled = DB.cancelled.filter((x) => x.id !== id);
       if (!useSupabase) saveDB(DB);
     },
 

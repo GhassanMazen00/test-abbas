@@ -4,7 +4,7 @@
 
 /* في وضع الخادم تبدأ الذاكرة فارغة وتُملأ بعد تسجيل الدخول؛ محلياً تُحمّل من المتصفح */
 let DB = (Store.mode === "supabase")
-  ? { customers: [], bills: [], payments: [], seq: { bill: 0, payment: 0 } }
+  ? { customers: [], bills: [], payments: [], cancelled: [], seq: { bill: 0, payment: 0, cancelled: 0 } }
   : initDB();
 let currentUser = null;
 
@@ -1148,6 +1148,7 @@ $$("#manager-view .tab").forEach((tab) => {
     if (tab.dataset.tab === "requests") renderRequestsTab();
     if (tab.dataset.tab === "rejected") refreshManagerRejected();
     if (tab.dataset.tab === "users") { renderUsersTab(); refreshUsers(); }
+    if (tab.dataset.tab === "cancelled") renderCancelledTab();
   });
 });
 
@@ -1158,9 +1159,102 @@ function renderManager() {
   renderStatementTab();
   renderAllBillsTab();
   renderCreditTab();
+  renderCancelledTab();
   renderRejectedTab();
   renderRequestsTab();
   renderUsersTab();
+}
+
+/* ---------- الفواتير الملغية (سجلّ منفصل لا يؤثر على أي رقم) ---------- */
+function cancelledItemsCell(c) {
+  return (c.items || []).map((it) => `${it.description} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>") || "—";
+}
+function renderCancelledTab() {
+  const list = (DB.cancelled || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  const rows = list.length ? list.map((c) => `
+    <tr>
+      <td class="num">${docCell(c.docNo)}</td>
+      <td>${fmtDate(c.date)}</td>
+      <td>${c.customerName || "—"}</td>
+      <td>${cancelledItemsCell(c)}</td>
+      <td>${(c.items || []).map((it) => it.size || "—").join("<br>") || "—"}</td>
+      <td class="num">${fmtMoney(c.total)}</td>
+      <td>${c.reason || "—"}</td>
+      <td class="row-actions">
+        <button class="btn btn-outline btn-sm" onclick="openCancelledForm(${c.id})">تعديل</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCancelled(${c.id})">حذف</button>
+      </td>
+    </tr>`).join("") : '<tr><td colspan="8" class="empty-msg">لا توجد فواتير ملغية.</td></tr>';
+  $("#tab-cancelled").innerHTML = `
+    <div class="section-head">
+      <p class="info-line" style="margin:0">سجلّ منفصل للفواتير الملغية — <b>لا يؤثر</b> على المبيعات أو الأرصدة، ولا يظهر في ملفات العملاء.</p>
+      <button class="btn btn-primary btn-sm" onclick="openCancelledForm()">+ فاتورة ملغية</button>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>المقاس</th><th>القيمة</th><th>سبب الإلغاء</th><th>إجراءات</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+function openCancelledForm(editId) {
+  const editing = editId != null;
+  const rec = editing ? DB.cancelled.find((c) => c.id === editId) : null;
+  const dateVal = editing ? cairoDayKey(rec.date) : cairoDayKey(new Date().toISOString());
+  openModal(editing ? "تعديل فاتورة ملغية" : "فاتورة ملغية جديدة", `
+    <div class="field"><label>التاريخ</label><input type="date" id="rec-date" value="${dateVal}" /></div>
+    <div class="field"><label>رقم الفاتورة (إلزامي)</label><input type="text" id="canc-docno" placeholder="مثال: 42690" value="${editing ? (rec.docNo || "") : ""}" /></div>
+    <div class="field"><label>اسم العميل (اختياري)</label><input type="text" id="canc-cust" placeholder="اسم العميل" value="${editing ? (rec.customerName || "").replace(/"/g, "&quot;") : ""}" /></div>
+    <div class="table-wrap">
+      <table class="bill-items">
+        <thead><tr><th style="width:32%">وصف الصنف</th><th style="width:14%">المقاس</th><th style="width:13%">العدد</th><th style="width:18%">السعر</th><th style="width:19%">الإجمالي</th><th style="width:4%"></th></tr></thead>
+        <tbody id="bill-rows"></tbody>
+      </table>
+    </div>
+    <button type="button" class="btn btn-outline btn-sm" onclick="addBillRow()">+ إضافة صف</button>
+    <div class="bill-total-row"><span>المجموع الكلي</span><span class="num" id="bill-grand-total">0 ج.م</span></div>
+    <div class="field"><label>سبب الإلغاء (اختياري)</label><textarea id="canc-reason" placeholder="سبب إلغاء الفاتورة...">${editing ? (rec.reason || "") : ""}</textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="saveCancelled(${editing ? editId : "null"})">${editing ? "حفظ التعديلات" : "حفظ"}</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+  if (editing) { (rec.items || []).forEach((it) => addBillRow(it)); } else { addBillRow(); addBillRow(); }
+}
+function saveCancelled(editId) {
+  const items = [];
+  $$("#bill-rows tr").forEach((tr) => {
+    const description = tr.querySelector(".it-desc").value.trim();
+    const size = tr.querySelector(".it-size").value.trim();
+    const count = Number(tr.querySelector(".it-count").value) || 0;
+    const price = Number(tr.querySelector(".it-price").value) || 0;
+    if (description && count > 0 && price >= 0) items.push({ description, size, count, price });
+  });
+  const docNo = ($("#canc-docno") ? $("#canc-docno").value : "").trim();
+  const customerName = ($("#canc-cust") ? $("#canc-cust").value : "").trim();
+  const reason = ($("#canc-reason") ? $("#canc-reason").value : "").trim();
+  if (!docNo) { toast("رقم الفاتورة إلزامي", true); return; }
+  if (!items.length) { toast("الرجاء إدخال صنف واحد على الأقل", true); return; }
+  const total = items.reduce((s, it) => s + it.count * it.price, 0);
+  const dateISO = recDateISO() || new Date().toISOString();
+  const editing = editId != null;
+  confirmDialog(editing ? "تأكيد التعديل" : "تأكيد الفاتورة الملغية",
+    (editing ? "هل تريد حفظ التعديلات؟" : "هل تريد حفظ هذه الفاتورة الملغية؟") + " القيمة: " + fmtMoney(total),
+    () => commitCancelled(editing ? editId : null, docNo, customerName, items, total, reason, dateISO));
+}
+async function commitCancelled(editId, docNo, customerName, items, total, reason, dateISO) {
+  try {
+    if (editId != null) await Store.updateCancelledInvoice(editId, docNo, customerName, items, total, reason, dateISO);
+    else await Store.addCancelledInvoice(docNo, customerName, items, total, reason, dateISO);
+    closeModal(); toast("تم حفظ الفاتورة الملغية");
+    renderCancelledTab(); renderDailyTab();
+  } catch (e) { toast(errMsg(e, "تعذّر الحفظ"), true); }
+}
+function deleteCancelled(id) {
+  confirmDialog("حذف فاتورة ملغية", "هل تريد حذف هذه الفاتورة الملغية؟ لا يمكن التراجع.", async () => {
+    try { await Store.deleteCancelledInvoice(id); toast("تم الحذف"); renderCancelledTab(); renderDailyTab(); }
+    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  }, { danger: true, yesLabel: "حذف" });
 }
 
 /* ---------- تبويب المستخدمون (من متصل الآن + تسجيل خروج) ---------- */
@@ -1400,6 +1494,19 @@ function renderDailyTab() {
       <td class="nav-cell">عرض ›</td>
     </tr>`).join("") : '<tr><td colspan="4" class="empty-msg">لا توجد مبيعات في هذه الفترة.</td></tr>';
 
+  let cancelledList = (DB.cancelled || []).slice();
+  if (dailyFrom) cancelledList = cancelledList.filter((c) => cairoDayKey(c.date) >= dailyFrom);
+  if (dailyTo) cancelledList = cancelledList.filter((c) => cairoDayKey(c.date) <= dailyTo);
+  cancelledList.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const cancRows = cancelledList.length ? cancelledList.map((c) => `
+    <tr>
+      <td class="num">${docCell(c.docNo)}</td>
+      <td>${fmtDate(c.date)}</td>
+      <td>${c.customerName || "—"}</td>
+      <td class="num">${fmtMoney(c.total)}</td>
+      <td>${c.reason || "—"}</td>
+    </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد فواتير ملغية في هذه الفترة.</td></tr>';
+
   $("#tab-daily").innerHTML = `
     <div class="stats-row">
       <div class="stat-card">
@@ -1423,6 +1530,13 @@ function renderDailyTab() {
           <tr><th>اليوم</th><th>عدد الفواتير</th><th>إجمالي المبيعات</th><th></th></tr>
         </thead>
         <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <h4 class="nav-cards-title">الفواتير الملغية <span class="info-line" style="font-weight:400">(لا تُحتسب ضمن المبيعات)</span></h4>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>القيمة</th><th>سبب الإلغاء</th></tr></thead>
+        <tbody>${cancRows}</tbody>
       </table>
     </div>`;
   const f = $("#daily-from"), t = $("#daily-to");

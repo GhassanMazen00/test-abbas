@@ -91,6 +91,18 @@ create table if not exists public.active_sessions (
 );
 create index if not exists active_sessions_lastseen_idx on public.active_sessions(last_seen);
 
+-- الفواتير الملغية (للمدير فقط، منفصلة تماماً) — انظر cancelled_invoices.sql
+create table if not exists public.cancelled_invoices (
+  id            bigint generated always as identity primary key,
+  doc_no        text default '',
+  customer_name text default '',
+  items         jsonb default '[]'::jsonb,
+  total         numeric default 0,
+  reason        text default '',
+  created_at    timestamptz not null default now()
+);
+create index if not exists cancelled_invoices_date_idx on public.cancelled_invoices(created_at);
+
 -- ---------- 2) دالة مساعدة: هل المستخدم الحالي مدير؟ ----------
 create or replace function public.is_manager()
 returns boolean
@@ -236,6 +248,21 @@ create policy active_sessions_update on public.active_sessions
 drop policy if exists active_sessions_delete on public.active_sessions;
 create policy active_sessions_delete on public.active_sessions
   for delete to authenticated using (user_id = auth.uid() or public.is_manager());
+
+-- cancelled_invoices: للمدير فقط
+alter table public.cancelled_invoices enable row level security;
+drop policy if exists cancelled_invoices_select on public.cancelled_invoices;
+create policy cancelled_invoices_select on public.cancelled_invoices
+  for select to authenticated using (public.is_manager());
+drop policy if exists cancelled_invoices_insert on public.cancelled_invoices;
+create policy cancelled_invoices_insert on public.cancelled_invoices
+  for insert to authenticated with check (public.is_manager());
+drop policy if exists cancelled_invoices_update on public.cancelled_invoices;
+create policy cancelled_invoices_update on public.cancelled_invoices
+  for update to authenticated using (public.is_manager());
+drop policy if exists cancelled_invoices_delete on public.cancelled_invoices;
+create policy cancelled_invoices_delete on public.cancelled_invoices
+  for delete to authenticated using (public.is_manager());
 
 -- ---------- 5) (اختياري) أسماء العملاء التجريبية ----------
 -- احذف علامات التعليق إذا رغبت ببيانات مبدئية:
