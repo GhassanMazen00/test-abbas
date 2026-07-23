@@ -401,10 +401,17 @@ table.data tbody tr:hover td { background: var(--primary-soft); }
   display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-bottom: 18px;
 }
 .filter-bar label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
-.filter-bar input[type="date"] {
+.filter-bar input[type="date"],
+.filter-bar input[type="number"] {
   padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px;
   background: var(--card); color: var(--text); font: inherit;
 }
+.filter-bar input[type="number"] { width: 150px; }
+.filter-bar label.checkbox-label {
+  flex-direction: row; align-items: center; gap: 8px; cursor: pointer;
+  color: var(--text); font-size: 14px;
+}
+.filter-bar label.checkbox-label input[type="checkbox"] { width: 17px; height: 17px; cursor: pointer; accent-color: var(--primary); }
 .badge {
   display: inline-block;
   padding: 4px 12px;
