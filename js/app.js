@@ -58,7 +58,9 @@ function fmtDateTime(iso) {
     " - " + d.toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit", timeZone: APP_TZ });
 }
 /* مفاتيح اليوم/الشهر بتوقيت مصر (YYYY-MM-DD / YYYY-MM) */
-function cairoDayKey(iso) { return new Date(iso).toLocaleDateString("en-CA", { timeZone: APP_TZ }); }
+/* مُنسّق مُخزَّن مسبقاً — أسرع بكثير من إنشاء منسّق جديد في كل نداء */
+const _cairoDayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
+function cairoDayKey(iso) { return _cairoDayFmt.format(new Date(iso)); }
 function cairoMonthKey(iso) { return cairoDayKey(iso).slice(0, 7); }
 function customerById(id) {
   return DB.customers.find((c) => c.id === id);
@@ -1484,17 +1486,43 @@ function cashCustomerId() {
   const c = DB.customers.find((x) => normSearch(x.name) === "نقدي");
   return c ? c.id : null;
 }
-/* إحصاءات يوم واحد */
+/* تجميع إحصاءات كل الأيام في مرور واحد (O(N)) — يتجنّب إعادة الترشيح لكل يوم */
+function emptyDayStats() { return { ajel: 0, discount: 0, returns: 0, transfer: 0, naqdi: 0, total: 0 }; }
+function buildActivityDayMap(cashId) {
+  const map = new Map();
+  const get = (k) => { let s = map.get(k); if (!s) { s = emptyDayStats(); map.set(k, s); } return s; };
+  for (const b of DB.bills) {
+    const s = get(cairoDayKey(b.date));
+    if (cashId != null && b.customerId === cashId) s.naqdi += b.total; else s.ajel += b.total;
+  }
+  for (const p of DB.payments) {
+    const k = kindOf(p);
+    if (k !== "discount" && k !== "return" && k !== "transfer") continue;
+    const s = get(cairoDayKey(p.date));
+    if (k === "discount") s.discount += p.amount;
+    else if (k === "return") s.returns += p.amount;
+    else s.transfer += p.amount;
+  }
+  map.forEach((s) => { s.total = s.naqdi + s.ajel - s.returns; }); // إجمالي المبيعات = النقدية + الآجلة − المرتجع
+  return map;
+}
+/* إحصاءات يوم واحد (يُستخدم في نافذة التفاصيل فقط) */
 function activityDayStats(key, cashId) {
-  const dayBills = DB.bills.filter((b) => cairoDayKey(b.date) === key);
-  const ajel = dayBills.filter((b) => b.customerId !== cashId).reduce((s, b) => s + b.total, 0);
-  const naqdi = dayBills.filter((b) => cashId != null && b.customerId === cashId).reduce((s, b) => s + b.total, 0);
-  const dayPays = DB.payments.filter((p) => cairoDayKey(p.date) === key);
-  const discount = dayPays.filter((p) => kindOf(p) === "discount").reduce((s, p) => s + p.amount, 0);
-  const returns = dayPays.filter((p) => kindOf(p) === "return").reduce((s, p) => s + p.amount, 0);
-  const transfer = dayPays.filter((p) => kindOf(p) === "transfer").reduce((s, p) => s + p.amount, 0);
-  const total = naqdi + ajel - returns; // إجمالي المبيعات = النقدية + الآجلة − المرتجع
-  return { ajel, discount, returns, transfer, naqdi, total };
+  const s = emptyDayStats();
+  for (const b of DB.bills) {
+    if (cairoDayKey(b.date) !== key) continue;
+    if (cashId != null && b.customerId === cashId) s.naqdi += b.total; else s.ajel += b.total;
+  }
+  for (const p of DB.payments) {
+    const k = kindOf(p);
+    if (k !== "discount" && k !== "return" && k !== "transfer") continue;
+    if (cairoDayKey(p.date) !== key) continue;
+    if (k === "discount") s.discount += p.amount;
+    else if (k === "return") s.returns += p.amount;
+    else s.transfer += p.amount;
+  }
+  s.total = s.naqdi + s.ajel - s.returns;
+  return s;
 }
 const DAY_META = {
   bill:     { label: "مبيعات آجلة",  badge: "badge-danger" },
@@ -1508,14 +1536,13 @@ let activityFrom = "", activityTo = "";
 function clearActivityFilter() { activityFrom = ""; activityTo = ""; renderActivityTab(); }
 function renderActivityTab() {
   const cashId = cashCustomerId();
-  const inRange = (d) => (!activityFrom || cairoDayKey(d) >= activityFrom) && (!activityTo || cairoDayKey(d) <= activityTo);
-  const dayset = new Set();
-  DB.bills.forEach((b) => { if (inRange(b.date)) dayset.add(cairoDayKey(b.date)); });
-  DB.payments.forEach((p) => { const k = kindOf(p); if ((k === "discount" || k === "return" || k === "transfer") && inRange(p.date)) dayset.add(cairoDayKey(p.date)); });
-  const keys = [...dayset].sort().reverse();
+  const dayMap = buildActivityDayMap(cashId);
+  const keys = [...dayMap.keys()]
+    .filter((k) => (!activityFrom || k >= activityFrom) && (!activityTo || k <= activityTo))
+    .sort().reverse();
   const grand = { ajel: 0, discount: 0, returns: 0, transfer: 0, naqdi: 0, total: 0 };
   const rows = keys.length ? keys.map((k) => {
-    const s = activityDayStats(k, cashId);
+    const s = dayMap.get(k);
     grand.ajel += s.ajel; grand.discount += s.discount; grand.returns += s.returns; grand.transfer += s.transfer; grand.naqdi += s.naqdi; grand.total += s.total;
     return `
     <tr class="clickable-row" onclick="openActivityDay('${k}')">
