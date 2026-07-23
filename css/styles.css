@@ -412,6 +412,7 @@ table.data tbody tr:hover td { background: var(--primary-soft); }
 .badge-danger  { background: var(--badge-danger-bg); color: var(--danger); }
 .badge-success { background: var(--badge-success-bg); color: var(--success); }
 .badge-transfer { background: rgba(99,102,241,.16); color: #6366f1; }
+.badge-muted { background: rgba(120,120,128,.16); color: var(--muted); }
 .badge-warning  { background: rgba(217,148,35,.16); color: var(--warning); }
 :root[data-theme="dark"] .badge-transfer { color: #a5b4fc; }
 .num { font-variant-numeric: tabular-nums; font-weight: 600; }
