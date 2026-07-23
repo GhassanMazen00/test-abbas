@@ -977,7 +977,7 @@ function addBillRow(item) {
   const tr = document.createElement("tr");
   const desc = item ? (item.description || "") : "";
   const size = item ? (item.size || "") : "";
-  const count = item ? item.count : 1;
+  const count = item ? item.count : 0;
   const price = item ? item.price : 0;
   tr.innerHTML = `
     <td><input type="text" class="it-desc" placeholder="وصف الصنف" value="${String(desc).replace(/"/g, "&quot;")}" /></td>
@@ -1067,7 +1067,7 @@ async function commitBill(custId, editId, items, total, docNo, mode, dateISO) {
 }
 
 /* ---------- نموذج دفعة/خصم (مبلغ) ---------- */
-const AMOUNT_KINDS = { payment: { word: "دفعة", label: "المبلغ المدفوع" }, discount: { word: "خصم", label: "قيمة الخصم" } };
+const AMOUNT_KINDS = { payment: { word: "دفعة", label: "المبلغ المدفوع", docReq: true }, discount: { word: "خصم", label: "قيمة الخصم", docReq: false } };
 function openDiscountForm(custId, editId) { openPaymentForm(custId, editId, "discount"); }
 function openPaymentForm(custId, editId, kind) {
   const cust = customerById(custId);
@@ -1083,7 +1083,7 @@ function openPaymentForm(custId, editId, kind) {
       <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
-      <label>رقم ال${def.word} (اختياري)</label>
+      <label>رقم ال${def.word} (${def.docReq ? "إلزامي" : "اختياري"})</label>
       <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? (pay.docNo || "") : ""}" />
     </div>
     <div class="field">
@@ -1105,6 +1105,10 @@ function savePayment(custId, editId, kind) {
   const docNo = ($("#pay-docno") ? $("#pay-docno").value : "").trim();
   if (amount <= 0) {
     toast("الرجاء إدخال مبلغ صحيح", true);
+    return;
+  }
+  if (AMOUNT_KINDS[kind].docReq && !docNo) {
+    toast("رقم ال" + word + " إلزامي", true);
     return;
   }
   const dateISO = recDateISO();
