@@ -981,11 +981,13 @@ function addBillRow(item) {
   const size = item ? (item.size || "") : "";
   const count = item ? item.count : 0;
   const price = item ? item.price : 0;
+  // المدير يستطيع إدخال سعر بالسالب (فاتورة تُنقص الرصيد / رصيد بالسالب)
+  const priceMin = (currentUser && currentUser.role === "manager") ? "" : ' min="0"';
   tr.innerHTML = `
     <td><input type="text" class="it-desc" placeholder="وصف الصنف" value="${String(desc).replace(/"/g, "&quot;")}" /></td>
     <td><input type="text" class="it-size" placeholder="المقاس" value="${String(size).replace(/"/g, "&quot;")}" /></td>
     <td><input type="number" class="it-count" min="0" value="${count}" oninput="recalcBill()" /></td>
-    <td><input type="number" class="it-price" min="0" value="${price}" oninput="recalcBill()" /></td>
+    <td><input type="number" class="it-price"${priceMin} value="${price}" oninput="recalcBill()" /></td>
     <td class="line-total">0</td>
     <td><button type="button" class="row-del" onclick="this.closest('tr').remove(); recalcBill()">&times;</button></td>
   `;
@@ -1009,13 +1011,15 @@ function saveBill(custId, editId, mode) {
   mode = mode || "bill";
   const isReturn = mode === "return";
   const word = isReturn ? "المرتجع" : "الفاتورة";
+  // المدير يستطيع تسجيل فاتورة بقيمة سالبة (تُنقص الرصيد) — عدا المرتجع
+  const allowNeg = !isReturn && currentUser && currentUser.role === "manager";
   const items = [];
   $$("#bill-rows tr").forEach((tr) => {
     const description = tr.querySelector(".it-desc").value.trim();
     const size = tr.querySelector(".it-size").value.trim();
     const count = Number(tr.querySelector(".it-count").value) || 0;
     const price = Number(tr.querySelector(".it-price").value) || 0;
-    if (description && count > 0 && price >= 0) {
+    if (description && count > 0 && (allowNeg || price >= 0)) {
       items.push({ description, size, count, price });
     }
   });
@@ -1029,8 +1033,8 @@ function saveBill(custId, editId, mode) {
     toast("رقم " + word + " إلزامي — لا يمكن الحفظ بدون رقم", true);
     return;
   }
-  if (total <= 0) {
-    toast("لا يمكن التسجيل بقيمة صفر أو بالسالب.", true);
+  if (allowNeg ? total === 0 : total <= 0) {
+    toast(allowNeg ? "لا يمكن التسجيل بقيمة صفر." : "لا يمكن التسجيل بقيمة صفر أو بالسالب.", true);
     return;
   }
   const dateISO = recDateISO();
@@ -1069,8 +1073,13 @@ async function commitBill(custId, editId, items, total, docNo, mode, dateISO) {
 }
 
 /* ---------- نموذج دفعة/خصم (مبلغ) ---------- */
-const AMOUNT_KINDS = { payment: { word: "دفعة", label: "المبلغ المدفوع", docReq: true }, discount: { word: "خصم", label: "قيمة الخصم", docReq: false } };
+const AMOUNT_KINDS = {
+  payment:  { word: "دفعة",  label: "المبلغ المدفوع", docReq: true },
+  discount: { word: "خصم",   label: "قيمة الخصم",     docReq: false },
+  transfer: { word: "ترحيل", label: "قيمة الترحيل",   docReq: false, docWord: "كشف" }
+};
 function openDiscountForm(custId, editId) { openPaymentForm(custId, editId, "discount"); }
+function openTransferForm(custId, editId) { openPaymentForm(custId, editId, "transfer"); }
 function openPaymentForm(custId, editId, kind) {
   const cust = customerById(custId);
   const editing = editId != null;
@@ -1085,7 +1094,7 @@ function openPaymentForm(custId, editId, kind) {
       <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
-      <label>رقم ال${def.word} (${def.docReq ? "إلزامي" : "اختياري"})</label>
+      <label>رقم ال${def.docWord || def.word} (${def.docReq ? "إلزامي" : "اختياري"})</label>
       <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? (pay.docNo || "") : ""}" />
     </div>
     <div class="field">
@@ -2042,6 +2051,7 @@ function renderPaymentsPage(custId) {
       <div class="btn-group">
         <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
         <button class="btn btn-outline btn-sm" onclick="openDiscountForm(${custId})">+ إضافة خصم</button>
+        <button class="btn btn-transfer btn-sm" onclick="openTransferForm(${custId})">+ إضافة ترحيل</button>
         <button class="btn btn-warning btn-sm" onclick="openReturnForm(${custId})">+ إضافة مرتجع</button>
       </div>
     </div>
