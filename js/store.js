@@ -211,28 +211,29 @@ const Store = (function () {
       return { id: data.id };
     },
     async listPendingEntries() {
-      if (!useSupabase) return peLoad().filter((r) => r.status === "pending");
+      if (!useSupabase) return peLoad().filter((r) => r.status === "pending").map(mapPending);
       const { data, error } = await sb.from("pending_entries").select("*").eq("status", "pending").order("created_at");
       if (error) throw error;
       return data.map(mapPending);
     },
     async listRejectedEntries(createdBy) {
-      if (!useSupabase) return peLoad().filter((r) => r.status === "rejected" && (!createdBy || r.createdBy === createdBy));
+      if (!useSupabase) return peLoad().filter((r) => r.status === "rejected" && (!createdBy || r.createdBy === createdBy)).map(mapPending);
       let q = sb.from("pending_entries").select("*").eq("status", "rejected");
       if (createdBy) q = q.eq("created_by", createdBy);
       const { data, error } = await q.order("decided_at", { ascending: false });
       if (error) throw error;
       return data.map(mapPending);
     },
-    async decidePendingEntry(id, approve, decidedBy) {
+    async decidePendingEntry(id, approve, decidedBy, reason) {
       const status = approve ? "approved" : "rejected";
+      const rej = approve ? null : (reason || "");
       if (!useSupabase) {
         const arr = peLoad(); const r = arr.find((x) => x.id === id);
-        if (r) { r.status = status; r.decided_by = decidedBy; r.decided_at = new Date().toISOString(); }
+        if (r) { r.status = status; r.decided_by = decidedBy; r.decided_at = new Date().toISOString(); r.reject_reason = rej; }
         peSave(arr); return;
       }
       const { error } = await sb.from("pending_entries")
-        .update({ status, decided_by: decidedBy, decided_at: new Date().toISOString() }).eq("id", id);
+        .update({ status, decided_by: decidedBy, decided_at: new Date().toISOString(), reject_reason: rej }).eq("id", id);
       if (error) throw error;
     },
     async deletePendingEntry(id) {
@@ -304,7 +305,8 @@ const Store = (function () {
       customerId: r.customer_id != null ? r.customer_id : r.customerId,
       customerName: r.customer_name != null ? r.customer_name : r.customerName,
       payload: r.payload || {}, createdBy: r.created_by != null ? r.created_by : r.createdBy,
-      status: r.status, created_at: r.created_at, decided_at: r.decided_at, decidedBy: r.decided_by
+      status: r.status, created_at: r.created_at, decided_at: r.decided_at, decidedBy: r.decided_by,
+      rejectReason: (r.reject_reason != null ? r.reject_reason : r.rejectReason) || ""
     };
   }
   function lrLoad() { try { return JSON.parse(localStorage.getItem("login_requests_v1") || "[]"); } catch (e) { return []; } }

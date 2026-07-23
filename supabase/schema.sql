@@ -74,7 +74,8 @@ create table if not exists public.pending_entries (
   status        text not null default 'pending' check (status in ('pending','approved','rejected')),
   created_at    timestamptz not null default now(),
   decided_by    text,
-  decided_at    timestamptz
+  decided_at    timestamptz,
+  reject_reason text
 );
 create index if not exists pending_entries_status_idx on public.pending_entries(status);
 
