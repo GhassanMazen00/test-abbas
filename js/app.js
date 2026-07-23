@@ -631,7 +631,7 @@ function rejectEntry(id) {
   openModal("سبب الرفض", `
     <p class="info-line">اكتب سبب رفض هذا الإدخال${e && e.customerName ? " (" + e.customerName + ")" : ""} ليطّلع عليه الموظف والمدير.</p>
     <div class="field">
-      <label>السبب (اختياري لكن مُستحسن)</label>
+      <label>السبب (إلزامي)</label>
       <textarea id="reject-reason" placeholder="مثال: الكمية غير صحيحة / السعر خاطئ / مكرّر..."></textarea>
     </div>
     <div class="modal-actions">
@@ -642,6 +642,7 @@ function rejectEntry(id) {
 }
 async function confirmReject(id) {
   const reason = ($("#reject-reason") ? $("#reject-reason").value : "").trim();
+  if (!reason) { toast("الرجاء كتابة سبب الرفض", true); return; }
   closeModal();
   try {
     await Store.decidePendingEntry(id, false, currentUser.username, reason);
