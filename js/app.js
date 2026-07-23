@@ -519,7 +519,8 @@ function entryDetail(e) {
 
 /* --------- تفاصيل إدخال (فاتورة/دفعة/مرتجع) --------- */
 function entryDetailBody(e) {
-  const meta = `<p class="info-line">المُدخِل: <b>${e.createdBy || "—"}</b> — الوقت: ${e.created_at ? fmtDateTime(e.created_at) : "—"}</p>`;
+  const reasonLine = e.rejectReason ? `<p class="info-line reject-reason">سبب الرفض: <b>${e.rejectReason}</b></p>` : "";
+  const meta = `<p class="info-line">المُدخِل: <b>${e.createdBy || "—"}</b> — الوقت: ${e.created_at ? fmtDateTime(e.created_at) : "—"}</p>${reasonLine}`;
   if (entryHasItems(e)) {
     const items = e.payload.items;
     const rows = items.map((it) => `
@@ -625,9 +626,25 @@ async function approveEntry(id) {
     await refreshReview();
   } catch (err) { toast(errMsg(err, "تعذّر تنفيذ الموافقة"), true); }
 }
-async function rejectEntry(id) {
+function rejectEntry(id) {
+  const e = findEntry(id);
+  openModal("سبب الرفض", `
+    <p class="info-line">اكتب سبب رفض هذا الإدخال${e && e.customerName ? " (" + e.customerName + ")" : ""} ليطّلع عليه الموظف والمدير.</p>
+    <div class="field">
+      <label>السبب (اختياري لكن مُستحسن)</label>
+      <textarea id="reject-reason" placeholder="مثال: الكمية غير صحيحة / السعر خاطئ / مكرّر..."></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" onclick="confirmReject(${id})">تأكيد الرفض</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+  const ta = $("#reject-reason"); if (ta) ta.focus();
+}
+async function confirmReject(id) {
+  const reason = ($("#reject-reason") ? $("#reject-reason").value : "").trim();
+  closeModal();
   try {
-    await Store.decidePendingEntry(id, false, currentUser.username);
+    await Store.decidePendingEntry(id, false, currentUser.username, reason);
     toast("تم رفض الإدخال");
     await refreshReview();
   } catch (err) { toast(errMsg(err, "تعذّر الرفض"), true); }
@@ -653,13 +670,14 @@ function renderRejected() {
       <td>${e.customerName || "—"}</td>
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
+      <td>${e.rejectReason ? e.rejectReason : "—"}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
-    </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+    </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
   $("#emp-rejected").innerHTML = `
-    <p class="info-line">إدخالات رفضها المراجِع. يمكنك إعادة إدخالها بشكل صحيح من تبويب «إضافة». (حذفها من صلاحية المدير)</p>
+    <p class="info-line">إدخالات رفضها المراجِع مع سبب الرفض. يمكنك إعادة إدخالها بشكل صحيح من تبويب «إضافة». (حذفها من صلاحية المدير)</p>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>وقت الرفض</th></tr></thead>
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>سبب الرفض</th><th>وقت الرفض</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -1195,17 +1213,18 @@ function renderRejectedTab() {
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
       <td>${e.createdBy || "—"}</td>
+      <td>${e.rejectReason ? e.rejectReason : "—"}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
       <td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); mgrDeleteRejected(${e.id})">حذف</button></td>
-    </tr>`).join("") : '<tr><td colspan="7" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+    </tr>`).join("") : '<tr><td colspan="8" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
   $("#tab-rejected").innerHTML = `
     <div class="section-head">
-      <p class="info-line" style="margin:0">الإدخالات التي رفضها المراجِع. حذفها من صلاحيتك وحدك.</p>
+      <p class="info-line" style="margin:0">الإدخالات التي رفضها المراجِع مع السبب. حذفها من صلاحيتك وحدك.</p>
       ${managerRejected.length ? '<button class="btn btn-danger btn-sm" onclick="mgrDeleteAllRejected()">حذف الكل</button>' : ""}
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>وقت الرفض</th><th>حذف</th></tr></thead>
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>سبب الرفض</th><th>وقت الرفض</th><th>حذف</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
