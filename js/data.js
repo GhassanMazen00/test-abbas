@@ -41,10 +41,13 @@ function initDB() {
       customers: DEMO_CUSTOMERS.map((name, i) => ({ id: i + 1, name })),
       bills: [],
       payments: [],
-      seq: { bill: 0, payment: 0 }
+      cancelled: [],
+      seq: { bill: 0, payment: 0, cancelled: 0 }
     };
     saveDB(db);
   }
+  if (!db.cancelled) db.cancelled = [];
+  if (db.seq && db.seq.cancelled == null) db.seq.cancelled = 0;
   return db;
 }
 
