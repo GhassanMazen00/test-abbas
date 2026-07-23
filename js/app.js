@@ -1477,78 +1477,139 @@ function renderClientsTab() {
   if (inp) inp.oninput = () => { clientsQuery = inp.value; $("#clients-body").innerHTML = clientsRows(); };
 }
 
-/* ---------- تبويب الحركة اليومية (كل الحركات مجمّعة) ---------- */
-const ACT_META = {
-  bill:      { label: "فاتورة",        badge: "badge-danger" },
-  payment:   { label: "دفعة",          badge: "badge-success" },
-  discount:  { label: "خصم",           badge: "badge-warning" },
-  return:    { label: "مرتجع",         badge: "badge-warning" },
-  transfer:  { label: "ترحيل",         badge: "badge-transfer" },
-  cancelled: { label: "فاتورة ملغية",  badge: "badge-muted" }
-};
-function actBadge(type) { const d = ACT_META[type] || { label: "—", badge: "badge" }; return `<span class="badge ${d.badge}">${d.label}</span>`; }
+/* ---------- تبويب الحركة اليومية (مجمّعة بالأيام) ---------- */
 function actItemsSummary(items) { return (items || []).map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>"); }
-function activityItems() {
-  const items = [];
-  DB.bills.forEach((b) => {
-    const c = customerById(b.customerId);
-    items.push({ date: b.date, type: "bill", customerName: c ? c.name : "—", docNo: b.docNo, detail: actItemsSummary(b.items), value: b.total });
-  });
-  DB.payments.forEach((p) => {
-    const c = customerById(p.customerId);
-    const k = kindOf(p);
-    const detail = (k === "return" && p.items && p.items.length) ? actItemsSummary(p.items) : (p.note || "—");
-    items.push({ date: p.date, type: k, customerName: c ? c.name : "—", docNo: p.docNo, detail, value: p.amount });
-  });
-  (DB.cancelled || []).forEach((c) => {
-    const d = actItemsSummary(c.items);
-    items.push({ date: c.date, type: "cancelled", customerName: c.customerName || "—", docNo: c.docNo, detail: (d || "") + (c.reason ? (d ? " — " : "") + c.reason : ""), value: c.total });
-  });
-  return items;
+/* العميل «نقدي» ليس عميلاً حقيقياً بل مخزن المبيعات النقدية */
+function cashCustomerId() {
+  const c = DB.customers.find((x) => normSearch(x.name) === "نقدي");
+  return c ? c.id : null;
 }
+/* إحصاءات يوم واحد */
+function activityDayStats(key, cashId) {
+  const dayBills = DB.bills.filter((b) => cairoDayKey(b.date) === key);
+  const ajel = dayBills.filter((b) => b.customerId !== cashId).reduce((s, b) => s + b.total, 0);
+  const naqdi = dayBills.filter((b) => cashId != null && b.customerId === cashId).reduce((s, b) => s + b.total, 0);
+  const dayPays = DB.payments.filter((p) => cairoDayKey(p.date) === key);
+  const discount = dayPays.filter((p) => kindOf(p) === "discount").reduce((s, p) => s + p.amount, 0);
+  const returns = dayPays.filter((p) => kindOf(p) === "return").reduce((s, p) => s + p.amount, 0);
+  const transfer = dayPays.filter((p) => kindOf(p) === "transfer").reduce((s, p) => s + p.amount, 0);
+  const total = naqdi + ajel - returns; // إجمالي المبيعات = النقدية + الآجلة − المرتجع
+  return { ajel, discount, returns, transfer, naqdi, total };
+}
+const DAY_META = {
+  bill:     { label: "مبيعات آجلة",  badge: "badge-danger" },
+  cash:     { label: "مبيعات نقدية", badge: "badge-success" },
+  discount: { label: "خصم",         badge: "badge-warning" },
+  return:   { label: "مرتجع",        badge: "badge-warning" },
+  transfer: { label: "ترحيل",        badge: "badge-transfer" }
+};
+function dayBadge(t) { const d = DAY_META[t] || { label: "—", badge: "badge" }; return `<span class="badge ${d.badge}">${d.label}</span>`; }
 let activityFrom = "", activityTo = "";
 function clearActivityFilter() { activityFrom = ""; activityTo = ""; renderActivityTab(); }
-function actStatCard(label, val) { return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value">${fmtMoney(val)}</div></div>`; }
 function renderActivityTab() {
-  let items = activityItems();
-  if (activityFrom) items = items.filter((i) => cairoDayKey(i.date) >= activityFrom);
-  if (activityTo) items = items.filter((i) => cairoDayKey(i.date) <= activityTo);
-  items.sort((a, b) => new Date(b.date) - new Date(a.date));
-  const tot = { bill: 0, payment: 0, discount: 0, return: 0, transfer: 0, cancelled: 0 };
-  items.forEach((i) => { tot[i.type] = (tot[i.type] || 0) + i.value; });
-  const rows = items.length ? items.map((i) => `
-    <tr>
-      <td>${fmtDateTime(i.date)}</td>
-      <td>${actBadge(i.type)}</td>
-      <td>${i.customerName || "—"}</td>
-      <td class="num">${docCell(i.docNo)}</td>
-      <td>${i.detail || "—"}</td>
-      <td class="num">${fmtMoney(i.value)}</td>
-    </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد حركات في هذه الفترة.</td></tr>';
+  const cashId = cashCustomerId();
+  const inRange = (d) => (!activityFrom || cairoDayKey(d) >= activityFrom) && (!activityTo || cairoDayKey(d) <= activityTo);
+  const dayset = new Set();
+  DB.bills.forEach((b) => { if (inRange(b.date)) dayset.add(cairoDayKey(b.date)); });
+  DB.payments.forEach((p) => { const k = kindOf(p); if ((k === "discount" || k === "return" || k === "transfer") && inRange(p.date)) dayset.add(cairoDayKey(p.date)); });
+  const keys = [...dayset].sort().reverse();
+  const grand = { ajel: 0, discount: 0, returns: 0, transfer: 0, naqdi: 0, total: 0 };
+  const rows = keys.length ? keys.map((k) => {
+    const s = activityDayStats(k, cashId);
+    grand.ajel += s.ajel; grand.discount += s.discount; grand.returns += s.returns; grand.transfer += s.transfer; grand.naqdi += s.naqdi; grand.total += s.total;
+    return `
+    <tr class="clickable-row" onclick="openActivityDay('${k}')">
+      <td>${fmtDate(k + "T12:00:00Z")}</td>
+      <td class="num">${fmtMoney(s.ajel)}</td>
+      <td class="num">${fmtMoney(s.discount)}</td>
+      <td class="num">${fmtMoney(s.returns)}</td>
+      <td class="num">${fmtMoney(s.transfer)}</td>
+      <td class="num">${fmtMoney(s.naqdi)}</td>
+      <td class="num"><b>${fmtMoney(s.total)}</b></td>
+      <td class="nav-cell">عرض ›</td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="8" class="empty-msg">لا توجد حركات في هذه الفترة.</td></tr>';
+  const foot = keys.length ? `
+    <tfoot><tr style="font-weight:800">
+      <td>الإجمالي</td>
+      <td class="num">${fmtMoney(grand.ajel)}</td>
+      <td class="num">${fmtMoney(grand.discount)}</td>
+      <td class="num">${fmtMoney(grand.returns)}</td>
+      <td class="num">${fmtMoney(grand.transfer)}</td>
+      <td class="num">${fmtMoney(grand.naqdi)}</td>
+      <td class="num">${fmtMoney(grand.total)}</td>
+      <td></td>
+    </tr></tfoot>` : "";
   $("#tab-activity").innerHTML = `
-    <div class="stats-grid">
-      ${actStatCard("إجمالي الفواتير", tot.bill)}
-      ${actStatCard("إجمالي الدفعات", tot.payment)}
-      ${actStatCard("إجمالي الخصومات", tot.discount)}
-      ${actStatCard("إجمالي المرتجعات", tot.return)}
-      ${actStatCard("إجمالي الترحيلات", tot.transfer)}
-      ${actStatCard("إجمالي الفواتير الملغية", tot.cancelled)}
-    </div>
     <div class="filter-bar">
       <label>من تاريخ <input type="date" id="act-from" value="${activityFrom}" /></label>
       <label>إلى تاريخ <input type="date" id="act-to" value="${activityTo}" /></label>
       <button class="btn btn-outline btn-sm" onclick="clearActivityFilter()">مسح الفلتر</button>
     </div>
-    <p class="info-line">كل الحركات (<b>${items.length.toLocaleString("ar-EG")}</b>) مرتّبة بالتاريخ — فواتير ودفعات وخصومات ومرتجعات وترحيلات وفواتير ملغية.</p>
+    <p class="info-line">الحركة مجمّعة حسب اليوم${cashId == null ? ' <span class="reject-reason">(لا يوجد عميل باسم «نقدي» — المبيعات النقدية = 0)</span>' : ""}. اضغط على أي يوم لعرض تفاصيله.</p>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>التاريخ</th><th>النوع</th><th>العميل</th><th>الرقم</th><th>البيان</th><th>القيمة</th></tr></thead>
+        <thead><tr>
+          <th>التاريخ</th>
+          <th>اجمالي المبيعات الآجلة</th>
+          <th>اجمالي الخصم</th>
+          <th>اجمالي المرتجع</th>
+          <th>اجمالي الترحيل</th>
+          <th>اجمالي المبيعات النقدية</th>
+          <th>اجمالي المبيعات</th>
+          <th></th>
+        </tr></thead>
         <tbody>${rows}</tbody>
+        ${foot}
       </table>
     </div>`;
   const f = $("#act-from"), t = $("#act-to");
   if (f) f.onchange = () => { activityFrom = f.value; renderActivityTab(); };
   if (t) t.onchange = () => { activityTo = t.value; renderActivityTab(); };
+}
+function openActivityDay(key) {
+  const cashId = cashCustomerId();
+  const s = activityDayStats(key, cashId);
+  const items = [];
+  DB.bills.filter((b) => cairoDayKey(b.date) === key).forEach((b) => {
+    const isCash = cashId != null && b.customerId === cashId;
+    const c = customerById(b.customerId);
+    items.push({ date: b.date, type: isCash ? "cash" : "bill", customerName: c ? c.name : "—", docNo: b.docNo, detail: actItemsSummary(b.items), value: b.total });
+  });
+  DB.payments.filter((p) => cairoDayKey(p.date) === key).forEach((p) => {
+    const k = kindOf(p);
+    if (k === "discount" || k === "return" || k === "transfer") {
+      const c = customerById(p.customerId);
+      const detail = (k === "return" && p.items && p.items.length) ? actItemsSummary(p.items) : (p.note || "—");
+      items.push({ date: p.date, type: k, customerName: c ? c.name : "—", docNo: p.docNo, detail, value: p.amount });
+    }
+  });
+  items.sort((a, b) => new Date(a.date) - new Date(b.date));
+  const rows = items.length ? items.map((i) => `
+    <tr>
+      <td>${dayBadge(i.type)}</td>
+      <td>${i.customerName || "—"}</td>
+      <td class="num">${docCell(i.docNo)}</td>
+      <td>${i.detail || "—"}</td>
+      <td class="num">${fmtMoney(i.value)}</td>
+    </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد حركات.</td></tr>';
+  openModal("حركة يوم " + fmtDate(key + "T12:00:00Z"), `
+    <div class="detail-grid">
+      <div><span>المبيعات الآجلة</span><b>${fmtMoney(s.ajel)}</b></div>
+      <div><span>المبيعات النقدية</span><b>${fmtMoney(s.naqdi)}</b></div>
+      <div><span>الخصم</span><b>${fmtMoney(s.discount)}</b></div>
+      <div><span>المرتجع</span><b>${fmtMoney(s.returns)}</b></div>
+      <div><span>الترحيل</span><b>${fmtMoney(s.transfer)}</b></div>
+      <div><span>إجمالي المبيعات</span><b>${fmtMoney(s.total)}</b></div>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>النوع</th><th>العميل</th><th>الرقم</th><th>البيان</th><th>القيمة</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">إغلاق</button></div>
+  `);
 }
 
 /* ---------- تبويب المبيعات اليومية ---------- */
