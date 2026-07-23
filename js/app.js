@@ -1248,7 +1248,7 @@ async function commitCancelled(editId, docNo, customerName, items, total, reason
     if (editId != null) await Store.updateCancelledInvoice(editId, docNo, customerName, items, total, reason, dateISO);
     else await Store.addCancelledInvoice(docNo, customerName, items, total, reason, dateISO);
     closeModal(); toast("تم حفظ الفاتورة الملغية");
-    renderCancelledTab(); renderDailyTab();
+    if (currentUser && currentUser.role === "manager") { renderCancelledTab(); renderDailyTab(); }
   } catch (e) { toast(errMsg(e, "تعذّر الحفظ"), true); }
 }
 function deleteCancelled(id) {

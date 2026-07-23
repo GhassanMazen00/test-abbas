@@ -256,7 +256,7 @@ create policy cancelled_invoices_select on public.cancelled_invoices
   for select to authenticated using (public.is_manager());
 drop policy if exists cancelled_invoices_insert on public.cancelled_invoices;
 create policy cancelled_invoices_insert on public.cancelled_invoices
-  for insert to authenticated with check (public.is_manager());
+  for insert to authenticated with check (true);
 drop policy if exists cancelled_invoices_update on public.cancelled_invoices;
 create policy cancelled_invoices_update on public.cancelled_invoices
   for update to authenticated using (public.is_manager());
