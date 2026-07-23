@@ -108,6 +108,8 @@ button { font-family: inherit; cursor: pointer; }
 .btn-danger  { background: var(--danger); color: #fff; }
 .btn-warning { background: var(--warning); color: #fff; }
 .btn-warning:hover { filter: brightness(.96); }
+.btn-transfer { background: #6366f1; color: #fff; }
+.btn-transfer:hover { filter: brightness(.96); }
 .btn-group { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .btn-ghost {
   background: transparent;
