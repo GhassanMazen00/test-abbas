@@ -1772,6 +1772,12 @@ function renderMonthlyTab() {
 /* ---------- تبويب كشف الحسابات ---------- */
 let statementQuery = "";
 let statementSort = { key: "", dir: -1 }; // dir: -1 تنازلي، 1 تصاعدي
+let statementBalMin = "";   // فلتر نطاق الرصيد المستحق (ج.م) — يدعم السالب
+let statementBalMax = "";
+let statementShowRatio = false; // عرض عمود نسبة السداد
+/* نسبة السداد = المدفوع ÷ الفواتير (تُحسب فقط حين تكون الفواتير موجبة) */
+function payRatioPct(id) { const tb = totalBills(id); return tb > 0 ? Math.round(totalPayments(id) / tb * 100) : null; }
+function payRatioCell(id) { const r = payRatioPct(id); return r == null ? "—" : r.toLocaleString("ar-EG") + "٪"; }
 function stmtVal(c, key) {
   switch (key) {
     case "nbills": return billsOf(c.id).length;
@@ -1779,6 +1785,7 @@ function stmtVal(c, key) {
     case "npays": return paymentsOf(c.id).length;
     case "tpays": return totalPayments(c.id);
     case "bal": return balanceOf(c.id);
+    case "ratio": { const tb = totalBills(c.id); return tb > 0 ? totalPayments(c.id) / tb : -1; }
     default: return c.name;
   }
 }
@@ -1797,6 +1804,17 @@ function statementRows() {
     const set = new Set(matchCustomers(statementQuery).map((c) => c.id));
     custs = DB.customers.filter((c) => set.has(c.id));
   }
+  // فلتر نطاق الرصيد المستحق (يدعم الأرقام السالبة/الرصيد الدائن)
+  const min = parseFloat(statementBalMin), max = parseFloat(statementBalMax);
+  const hasMin = !isNaN(min), hasMax = !isNaN(max);
+  if (hasMin || hasMax) {
+    custs = custs.filter((c) => {
+      const bal = balanceOf(c.id);
+      if (hasMin && bal < min) return false;
+      if (hasMax && bal > max) return false;
+      return true;
+    });
+  }
   if (statementSort.key) {
     const k = statementSort.key, dir = statementSort.dir;
     custs = custs.slice().sort((a, b) => {
@@ -1805,7 +1823,8 @@ function statementRows() {
       return (va - vb) * dir;
     });
   }
-  if (!custs.length) return '<tr><td colspan="6" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>';
+  const cols = statementShowRatio ? 7 : 6;
+  if (!custs.length) return `<tr><td colspan="${cols}" class="empty-msg">لا يوجد عميل مطابق.</td></tr>`;
   return custs.map((c) => {
     const bal = balanceOf(c.id);
     return `
@@ -1816,6 +1835,7 @@ function statementRows() {
         <td class="num">${paymentsOf(c.id).length}</td>
         <td class="num">${fmtMoney(totalPayments(c.id))}</td>
         <td class="num">${fmtMoney(bal)}</td>
+        ${statementShowRatio ? `<td class="num">${payRatioCell(c.id)}</td>` : ""}
       </tr>`;
   }).join("");
 }
@@ -1824,7 +1844,20 @@ function renderStatementTab() {
     <div class="search-bar">
       <input type="text" id="statement-search" placeholder="ابحث باسم العميل..." value="${statementQuery.replace(/"/g, "&quot;")}" />
     </div>
-    <p class="info-line">كشف حساب مختصر لكل عميل — اضغط على العميل لعرض التفاصيل، أو على عنوان العمود للترتيب.</p>
+    <div class="filter-bar">
+      <label>الرصيد المستحق من (ج.م)
+        <input type="number" step="any" inputmode="decimal" id="stmt-bal-min" placeholder="مثال: -1000" value="${statementBalMin}" />
+      </label>
+      <label>إلى (ج.م)
+        <input type="number" step="any" inputmode="decimal" id="stmt-bal-max" placeholder="مثال: 5000" value="${statementBalMax}" />
+      </label>
+      <button class="btn btn-outline btn-sm" onclick="clearStatementRange()">مسح النطاق</button>
+      <label class="checkbox-label">
+        <input type="checkbox" id="stmt-show-ratio" ${statementShowRatio ? "checked" : ""} onchange="toggleStatementRatio(this.checked)" />
+        عرض نسبة السداد
+      </label>
+    </div>
+    <p class="info-line">كشف حساب مختصر لكل عميل — اضغط على العميل لعرض التفاصيل، أو على عنوان العمود للترتيب. نطاق الرصيد يدعم الأرقام السالبة (رصيد دائن).</p>
     <div class="table-wrap">
       <table class="data">
         <thead>
@@ -1835,6 +1868,7 @@ function renderStatementTab() {
             <th class="sortable" onclick="sortStatement('npays')">عدد الدفعات${stmtArrow("npays")}</th>
             <th class="sortable" onclick="sortStatement('tpays')">إجمالي الدفعات${stmtArrow("tpays")}</th>
             <th class="sortable" onclick="sortStatement('bal')">الرصيد المستحق${stmtArrow("bal")}</th>
+            ${statementShowRatio ? `<th class="sortable" onclick="sortStatement('ratio')">نسبة السداد${stmtArrow("ratio")}</th>` : ""}
           </tr>
         </thead>
         <tbody id="statement-body">${statementRows()}</tbody>
@@ -1842,7 +1876,12 @@ function renderStatementTab() {
     </div>`;
   const inp = $("#statement-search");
   if (inp) inp.oninput = () => { statementQuery = inp.value; $("#statement-body").innerHTML = statementRows(); };
+  const mn = $("#stmt-bal-min"), mx = $("#stmt-bal-max");
+  if (mn) mn.oninput = () => { statementBalMin = mn.value; $("#statement-body").innerHTML = statementRows(); };
+  if (mx) mx.oninput = () => { statementBalMax = mx.value; $("#statement-body").innerHTML = statementRows(); };
 }
+function clearStatementRange() { statementBalMin = ""; statementBalMax = ""; renderStatementTab(); }
+function toggleStatementRatio(on) { statementShowRatio = !!on; renderStatementTab(); }
 
 /* ---------- تبويب الأرصدة الدائنة (العملاء الذين دفعوا أكثر من مستحقاتهم) ---------- */
 function renderCreditTab() {
