@@ -504,6 +504,7 @@ let pendingEntries = [], rejectedEntries = [];
 function entryKindBadge(k) {
   if (k === "bill") return '<span class="badge badge-danger">فاتورة</span>';
   if (k === "return") return '<span class="badge badge-warning">مرتجع</span>';
+  if (k === "cancelled") return '<span class="badge badge-muted">فاتورة ملغية</span>';
   return '<span class="badge badge-success">دفعة</span>';
 }
 function entryHasItems(e) { return Array.isArray(e.payload.items) && e.payload.items.length > 0; }
@@ -533,14 +534,16 @@ function entryDetailBody(e) {
         <td class="num">${fmtMoney(it.price)}</td>
         <td class="num">${fmtMoney((Number(it.count) || 0) * (Number(it.price) || 0))}</td>
       </tr>`).join("");
+    const typeLabel = e.kind === "return" ? "مرتجع" : (e.kind === "cancelled" ? "فاتورة ملغية" : "فاتورة");
+    const reasonCanc = (e.kind === "cancelled" && e.payload.reason) ? `<p class="info-line">سبب الإلغاء: <b>${e.payload.reason}</b></p>` : "";
     return `
-      <p class="info-line">العميل: <b>${e.customerName || "—"}</b> &nbsp;•&nbsp; النوع: <b>${e.kind === "return" ? "مرتجع" : "فاتورة"}</b> &nbsp;•&nbsp; الرقم: <b>${e.payload.docNo || "—"}</b></p>
+      <p class="info-line">العميل: <b>${e.customerName || "—"}</b> &nbsp;•&nbsp; النوع: <b>${typeLabel}</b> &nbsp;•&nbsp; الرقم: <b>${e.payload.docNo || "—"}</b></p>
       <div class="table-wrap"><table class="data">
         <thead><tr><th>وصف الصنف</th><th>المقاس</th><th>العدد</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
       <div class="bill-total-row"><span>المجموع الكلي</span><span class="num">${fmtMoney(e.payload.total || 0)}</span></div>
-      ${meta}`;
+      ${reasonCanc}${meta}`;
   }
   const word = e.payload.kind === "discount" ? "خصم" : (e.kind === "return" ? "مرتجع" : "دفعة");
   return `
@@ -554,7 +557,10 @@ function entryDetailBody(e) {
     ${meta}`;
 }
 function entryTitle(e) {
-  return e.kind === "bill" ? "تفاصيل الفاتورة" : (e.kind === "return" ? "تفاصيل المرتجع" : "تفاصيل الدفعة");
+  if (e.kind === "bill") return "تفاصيل الفاتورة";
+  if (e.kind === "return") return "تفاصيل المرتجع";
+  if (e.kind === "cancelled") return "تفاصيل الفاتورة الملغية";
+  return "تفاصيل الدفعة";
 }
 function showEntryDetails(id) {
   const e = findEntry(id);
@@ -618,6 +624,8 @@ async function approveEntry(id) {
   try {
     if (e.kind === "bill") {
       await Store.addBill(e.customerId, e.payload.items, e.payload.total, e.payload.docNo);
+    } else if (e.kind === "cancelled") {
+      await Store.addCancelledInvoice(e.payload.docNo, e.customerName, e.payload.items, e.payload.total, e.payload.reason, e.payload.dateISO);
     } else {
       const amt = e.payload.total != null ? e.payload.total : (e.payload.amount || 0);
       const kind = e.payload.kind || (e.kind === "return" ? "return" : "payment");
@@ -1262,8 +1270,19 @@ function saveCancelled(editId) {
 }
 async function commitCancelled(editId, docNo, customerName, items, total, reason, dateISO) {
   try {
-    if (editId != null) await Store.updateCancelledInvoice(editId, docNo, customerName, items, total, reason, dateISO);
-    else await Store.addCancelledInvoice(docNo, customerName, items, total, reason, dateISO);
+    if (editId != null) {
+      await Store.updateCancelledInvoice(editId, docNo, customerName, items, total, reason, dateISO);
+      closeModal(); toast("تم حفظ التعديلات");
+      if (currentUser && currentUser.role === "manager") { renderCancelledTab(); renderDailyTab(); }
+      return;
+    }
+    // الموظف (worker1) يرسلها لمراجعة worker2 بدل الحفظ المباشر
+    if (isMaker()) {
+      await Store.createPendingEntry("cancelled", null, customerName, { docNo, items, total, reason, dateISO }, currentUser.username);
+      closeModal(); toast("تم إرسال الفاتورة الملغية للمراجعة");
+      return;
+    }
+    await Store.addCancelledInvoice(docNo, customerName, items, total, reason, dateISO);
     closeModal(); toast("تم حفظ الفاتورة الملغية");
     if (currentUser && currentUser.role === "manager") { renderCancelledTab(); renderDailyTab(); }
   } catch (e) { toast(errMsg(e, "تعذّر الحفظ"), true); }

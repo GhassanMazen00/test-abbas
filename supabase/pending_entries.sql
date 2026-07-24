@@ -6,10 +6,10 @@
 
 create table if not exists public.pending_entries (
   id            bigint generated always as identity primary key,
-  kind          text not null check (kind in ('bill','payment','return')),
+  kind          text not null check (kind in ('bill','payment','return','cancelled')),
   customer_id   bigint references public.customers(id) on delete cascade,
   customer_name text,
-  payload       jsonb not null,          -- فاتورة: {items,total,docNo} | دفعة/مرتجع: {amount,note,docNo,kind}
+  payload       jsonb not null,          -- فاتورة: {items,total,docNo} | دفعة/مرتجع: {amount,note,docNo,kind} | فاتورة ملغية: {docNo,items,total,reason,dateISO}
   created_by    text,                     -- اسم مستخدم مُنشئ الإدخال
   status        text not null default 'pending' check (status in ('pending','approved','rejected')),
   created_at    timestamptz not null default now(),
@@ -17,6 +17,11 @@ create table if not exists public.pending_entries (
   decided_at    timestamptz,
   reject_reason text
 );
+
+-- ترقية جدول موجود: أضِف النوع «cancelled» (فاتورة ملغية) إلى القيد (آمن للتكرار)
+alter table public.pending_entries drop constraint if exists pending_entries_kind_check;
+alter table public.pending_entries
+  add constraint pending_entries_kind_check check (kind in ('bill','payment','return','cancelled'));
 
 create index if not exists pending_entries_status_idx  on public.pending_entries(status);
 create index if not exists pending_entries_creator_idx on public.pending_entries(created_by);
