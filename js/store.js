@@ -173,9 +173,12 @@ const Store = (function () {
       }
       const payload = { doc_no: docNo, customer_name: customerName, items, total, reason };
       if (dateISO) payload.created_at = dateISO;
-      const { data, error } = await sb.from("cancelled_invoices").insert(payload).select().single();
+      // بدون .select() لأن سياسة القراءة للمدير فقط (القراءة بعد الإدراج تفشل لغير المدير)
+      const { error } = await sb.from("cancelled_invoices").insert(payload);
       if (error) throw error;
-      const rec = mapCancelled(data); DB.cancelled.push(rec); return rec;
+      // حدّث النسخة المحلية إن كان المستخدم يملك صلاحية القراءة (المدير)
+      try { DB.cancelled = (await this.fetchAllRows("cancelled_invoices")).map(mapCancelled); } catch (e) {}
+      return null;
     },
     async updateCancelledInvoice(id, docNo, customerName, items, total, reason, dateISO) {
       docNo = docNo || ""; customerName = customerName || ""; items = items || []; reason = reason || "";

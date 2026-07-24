@@ -66,7 +66,7 @@ create index if not exists login_requests_status_idx on public.login_requests(st
 -- إدخالات بانتظار مراجعة الموظف المراجِع (worker1 → worker2) — انظر pending_entries.sql
 create table if not exists public.pending_entries (
   id            bigint generated always as identity primary key,
-  kind          text not null check (kind in ('bill','payment','return')),
+  kind          text not null check (kind in ('bill','payment','return','cancelled')),
   customer_id   bigint references public.customers(id) on delete cascade,
   customer_name text,
   payload       jsonb not null,
