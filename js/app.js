@@ -75,7 +75,7 @@ function balanceOf(id) { return totalBills(id) - totalPayments(id); }
 const PAY_KINDS = {
   payment:  { label: "دفعة",  badge: "badge-success" },
   transfer: { label: "ترحيل", badge: "badge-transfer" },
-  discount: { label: "خصم",   badge: "badge-warning" },
+  discount: { label: "خصم",   badge: "badge-discount" },
   return:   { label: "مرتجع", badge: "badge-warning" }
 };
 function kindOf(p) { return PAY_KINDS[p.kind] ? p.kind : "payment"; }
@@ -1555,7 +1555,7 @@ function activityDayStats(key, cashId) {
 const DAY_META = {
   bill:     { label: "مبيعات آجلة",  badge: "badge-danger" },
   cash:     { label: "مبيعات نقدية", badge: "badge-success" },
-  discount: { label: "خصم",         badge: "badge-warning" },
+  discount: { label: "خصم",         badge: "badge-discount" },
   return:   { label: "مرتجع",        badge: "badge-warning" },
   transfer: { label: "ترحيل",        badge: "badge-transfer" }
 };
