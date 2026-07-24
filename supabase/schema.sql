@@ -9,7 +9,7 @@
 create table if not exists public.profiles (
   id         uuid primary key references auth.users(id) on delete cascade,
   username   text unique not null,
-  role       text not null default 'employee' check (role in ('employee','manager')),
+  role       text not null default 'employee' check (role in ('employee','manager','supervisor')),
   created_at timestamptz not null default now()
 );
 
@@ -117,6 +117,20 @@ as $$
   );
 $$;
 
+-- المشرف أو المدير (للقراءة والإشراف: دخول/جلسات/فواتير ملغية) — انظر supervisor_role.sql
+create or replace function public.is_overseer()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.profiles
+    where id = auth.uid() and role in ('manager','supervisor')
+  );
+$$;
+
 -- ---------- 3) إنشاء ملف تعريف تلقائياً عند إضافة مستخدم مصادقة ----------
 -- اسم المستخدم = الجزء قبل @ من البريد، والدور من user metadata (افتراضياً موظف)
 create or replace function public.handle_new_user()
@@ -163,7 +177,7 @@ alter table public.payments  enable row level security;
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles
   for select to authenticated
-  using (id = auth.uid() or public.is_manager());
+  using (id = auth.uid() or public.is_overseer());
 
 -- customers: أي مستخدم مسجّل يقرأ ويضيف؛ التعديل/الحذف للمدير فقط
 drop policy if exists customers_select on public.customers;
@@ -214,10 +228,10 @@ create policy login_requests_insert on public.login_requests
   for insert to authenticated with check (user_id = auth.uid());
 drop policy if exists login_requests_select on public.login_requests;
 create policy login_requests_select on public.login_requests
-  for select to authenticated using (user_id = auth.uid() or public.is_manager());
+  for select to authenticated using (user_id = auth.uid() or public.is_overseer());
 drop policy if exists login_requests_update on public.login_requests;
 create policy login_requests_update on public.login_requests
-  for update to authenticated using (public.is_manager());
+  for update to authenticated using (public.is_overseer());
 
 -- pending_entries: أي مستخدم مسجّل يُنشئ ويقرأ ويحدّث (المراجعة داخلية بين الموظفين)
 alter table public.pending_entries enable row level security;
@@ -241,10 +255,10 @@ create policy active_sessions_insert on public.active_sessions
   for insert to authenticated with check (user_id = auth.uid());
 drop policy if exists active_sessions_select on public.active_sessions;
 create policy active_sessions_select on public.active_sessions
-  for select to authenticated using (user_id = auth.uid() or public.is_manager());
+  for select to authenticated using (user_id = auth.uid() or public.is_overseer());
 drop policy if exists active_sessions_update on public.active_sessions;
 create policy active_sessions_update on public.active_sessions
-  for update to authenticated using (user_id = auth.uid() or public.is_manager());
+  for update to authenticated using (user_id = auth.uid() or public.is_overseer());
 drop policy if exists active_sessions_delete on public.active_sessions;
 create policy active_sessions_delete on public.active_sessions
   for delete to authenticated using (user_id = auth.uid() or public.is_manager());
@@ -253,7 +267,7 @@ create policy active_sessions_delete on public.active_sessions
 alter table public.cancelled_invoices enable row level security;
 drop policy if exists cancelled_invoices_select on public.cancelled_invoices;
 create policy cancelled_invoices_select on public.cancelled_invoices
-  for select to authenticated using (public.is_manager());
+  for select to authenticated using (public.is_overseer());
 drop policy if exists cancelled_invoices_insert on public.cancelled_invoices;
 create policy cancelled_invoices_insert on public.cancelled_invoices
   for insert to authenticated with check (true);

@@ -30,7 +30,8 @@ const USERS = {
   "مدير":   { password: "1234", role: "manager",  name: "المدير" },
   "worker1": { password: "1234", role: "employee", name: "الموظف الأول" },
   "worker2": { password: "1234", role: "employee", name: "المراجِع" },
-  "worker3": { password: "1234", role: "employee", name: "مطّلِع" }
+  "worker3": { password: "1234", role: "employee", name: "مطّلِع" },
+  "odai":    { password: "1234", role: "supervisor", name: "مشرف" }
 };
 
 /* تهيئة قاعدة البيانات لأول مرة */
