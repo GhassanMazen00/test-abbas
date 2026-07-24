@@ -11,9 +11,16 @@ let currentUser = null;
 /* ---------- الأدوار ---------- */
 const REVIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.REVIEWER_USERNAME) || "worker2";
 const VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.VIEWER_USERNAME) || "worker3";
+const SUPERVISOR_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.SUPERVISOR_USERNAME) || "odai";
 function isReviewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === REVIEWER_USERNAME; }
 function isViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === VIEWER_USERNAME; }
-function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME; }
+/* المشرف: يرى واجهة المدير كاملة لكن للقراءة فقط (يُحدَّد بالدور supervisor أو باسم المستخدم) */
+function isSupervisor(u) { u = u || currentUser; return !!u && u.role !== "manager" && (u.role === "supervisor" || u.username === SUPERVISOR_USERNAME); }
+/* هل يرى المستخدم لوحة المدير؟ (المدير أو المشرف) */
+function isManagerView(u) { u = u || currentUser; return !!u && (u.role === "manager" || isSupervisor(u)); }
+/* هل يملك صلاحية التعديل/الإضافة/الحذف على البيانات؟ (المدير فقط) */
+function canEdit(u) { u = u || currentUser; return !!u && u.role === "manager"; }
+function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && !isSupervisor(u); }
 
 /* ---------- أدوات مساعدة ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -343,8 +350,8 @@ $("#login-form").addEventListener("submit", async (e) => {
     currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     $("#login-form").reset();
     try { localStorage.removeItem(APPROVED_KEY); } catch (er) {}
-    // المدير يدخل مباشرة؛ الموظف ينتظر موافقة المدير
-    if (currentUser.role !== "manager") {
+    // المدير والمشرف يدخلان مباشرة؛ بقية الموظفين ينتظرون موافقة المدير
+    if (!isManagerView()) {
       let reqId = null;
       try {
         const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo());
@@ -420,7 +427,7 @@ async function forcedLogout() {
     // الموظف يحتاج موافقة إن لم يكن قد وُوفق على جلسته
     let approved = false;
     try { approved = localStorage.getItem(APPROVED_KEY) === "1"; } catch (e) {}
-    if (currentUser.role !== "manager" && !approved) {
+    if (!isManagerView() && !approved) {
       let reqId = null;
       try { const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo()); reqId = r && r.id; } catch (er) { reqId = null; }
       if (reqId != null) { startWaiting(reqId); return; }
@@ -467,11 +474,12 @@ function startApp() {
   $("#login-screen").classList.add("hidden");
   $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  const roleLabel = currentUser.role === "manager" ? "المدير" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : "الموظف"));
+  const roleLabel = currentUser.role === "manager" ? "المدير" : (isSupervisor() ? "مشرف" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : "الموظف")));
   $("#current-user").textContent = roleLabel + ": " + currentUser.username;
 
-  if (currentUser.role === "manager") {
+  if (isManagerView()) {
     document.querySelector('.tab[data-tab="requests"]').classList.remove("hidden");
+    document.body.classList.toggle("readonly-view", !canEdit());
     showOnlyView("manager-view");
     renderManager();
     startRequestPolling();
@@ -841,7 +849,7 @@ function updateReqBadge(n) {
   b.classList.toggle("hidden", !n);
 }
 async function refreshRequests() {
-  if (!currentUser || currentUser.role !== "manager") return;
+  if (!isManagerView()) return;
   try { pendingRequests = await Store.listPendingLoginRequests(); } catch (e) { return; }
   updateReqBadge(pendingRequests.length);
   const tab = document.querySelector('.tab[data-tab="requests"]');
@@ -1206,19 +1214,19 @@ function renderCancelledTab() {
       <td>${(c.items || []).map((it) => it.size || "—").join("<br>") || "—"}</td>
       <td class="num">${fmtMoney(c.total)}</td>
       <td>${c.reason || "—"}</td>
-      <td class="row-actions">
+      ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="openCancelledForm(${c.id})">تعديل</button>
         <button class="btn btn-danger btn-sm" onclick="deleteCancelled(${c.id})">حذف</button>
-      </td>
-    </tr>`).join("") : '<tr><td colspan="8" class="empty-msg">لا توجد فواتير ملغية.</td></tr>';
+      </td>` : ""}
+    </tr>`).join("") : `<tr><td colspan="${canEdit() ? 8 : 7}" class="empty-msg">لا توجد فواتير ملغية.</td></tr>`;
   $("#tab-cancelled").innerHTML = `
     <div class="section-head">
       <p class="info-line" style="margin:0">سجلّ منفصل للفواتير الملغية — <b>لا يؤثر</b> على المبيعات أو الأرصدة، ولا يظهر في ملفات العملاء.</p>
-      <button class="btn btn-primary btn-sm" onclick="openCancelledForm()">+ فاتورة ملغية</button>
+      ${canEdit() ? '<button class="btn btn-primary btn-sm" onclick="openCancelledForm()">+ فاتورة ملغية</button>' : ""}
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>المقاس</th><th>القيمة</th><th>سبب الإلغاء</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>المقاس</th><th>القيمة</th><th>سبب الإلغاء</th>${canEdit() ? "<th>إجراءات</th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -1322,7 +1330,7 @@ function renderUsersTab() {
     </div>`;
 }
 async function refreshUsers() {
-  if (!currentUser || currentUser.role !== "manager") return;
+  if (!isManagerView()) return;
   try { activeSessions = await Store.listActiveSessions(); } catch (e) { return; }
   const tab = document.querySelector('.tab[data-tab="users"]');
   if (tab && tab.classList.contains("active")) renderUsersTab();
@@ -1346,22 +1354,22 @@ function renderRejectedTab() {
       <td>${e.createdBy || "—"}</td>
       <td>${e.rejectReason ? e.rejectReason : "—"}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
-      <td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); mgrDeleteRejected(${e.id})">حذف</button></td>
-    </tr>`).join("") : '<tr><td colspan="8" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
+      ${canEdit() ? `<td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); mgrDeleteRejected(${e.id})">حذف</button></td>` : ""}
+    </tr>`).join("") : `<tr><td colspan="${canEdit() ? 8 : 7}" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>`;
   $("#tab-rejected").innerHTML = `
     <div class="section-head">
-      <p class="info-line" style="margin:0">الإدخالات التي رفضها المراجِع مع السبب. حذفها من صلاحيتك وحدك.</p>
-      ${managerRejected.length ? '<button class="btn btn-danger btn-sm" onclick="mgrDeleteAllRejected()">حذف الكل</button>' : ""}
+      <p class="info-line" style="margin:0">الإدخالات التي رفضها المراجِع مع السبب.${canEdit() ? " حذفها من صلاحيتك وحدك." : ""}</p>
+      ${canEdit() && managerRejected.length ? '<button class="btn btn-danger btn-sm" onclick="mgrDeleteAllRejected()">حذف الكل</button>' : ""}
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>سبب الرفض</th><th>وقت الرفض</th><th>حذف</th></tr></thead>
+        <thead><tr><th>النوع</th><th>العميل</th><th>التفاصيل</th><th>القيمة</th><th>المُدخِل</th><th>سبب الرفض</th><th>وقت الرفض</th>${canEdit() ? "<th>حذف</th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
 }
 async function refreshManagerRejected() {
-  if (!currentUser || currentUser.role !== "manager") return;
+  if (!isManagerView()) return;
   try { managerRejected = await Store.listRejectedEntries(); } catch (e) { return; }
   renderRejectedTab();
 }
@@ -1439,7 +1447,7 @@ function clientsRows() {
     const set = new Set(matchCustomers(clientsQuery).map((c) => c.id));
     custs = DB.customers.filter((c) => set.has(c.id));
   }
-  if (!custs.length) return '<tr><td colspan="6" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>';
+  if (!custs.length) return `<tr><td colspan="${canEdit() ? 6 : 5}" class="empty-msg">لا يوجد عميل مطابق للبحث.</td></tr>`;
   return custs.map((c) => {
     const bal = balanceOf(c.id);
     const cls = bal > 0 ? "badge-danger" : "badge-success";
@@ -1451,10 +1459,10 @@ function clientsRows() {
         <td class="num">${fmtMoney(totalPayments(c.id))}</td>
         <td class="num">${fmtMoney(bal)}</td>
         <td><span class="badge ${cls}">${label}</span></td>
-        <td class="row-actions">
+        ${canEdit() ? `<td class="row-actions">
           <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); editCustomerForm(${c.id})">تعديل</button>
           <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteCustomer(${c.id})">حذف</button>
-        </td>
+        </td>` : ""}
       </tr>`;
   }).join("");
 }
@@ -1483,7 +1491,7 @@ function renderClientsTab() {
     </div>
     <div class="section-head">
       <p class="info-line" style="margin:0">اضغط على أي عميل لعرض ملفه الكامل.</p>
-      <button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل</button>
+      ${canEdit() ? '<button class="btn btn-primary btn-sm" onclick="addCustomerForm()">+ إضافة عميل</button>' : ""}
     </div>
     <div class="search-bar">
       <input type="text" id="clients-search" placeholder="ابحث باسم العميل..." value="${clientsQuery.replace(/"/g, "&quot;")}" />
@@ -1497,7 +1505,7 @@ function renderClientsTab() {
             <th>إجمالي الدفعات</th>
             <th>الرصيد المستحق</th>
             <th>الحالة</th>
-            <th>إجراءات</th>
+            ${canEdit() ? "<th>إجراءات</th>" : ""}
           </tr>
         </thead>
         <tbody id="clients-body">${clientsRows()}</tbody>
@@ -2037,7 +2045,7 @@ function billsPageRows(custId) {
   const bills = billsOf(custId).slice()
     .filter((b) => billMatchesQuery(b, billsSearchQuery))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
-  if (!bills.length) return '<tr><td colspan="9" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
+  if (!bills.length) return `<tr><td colspan="${canEdit() ? 9 : 8}" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>`;
   return bills.map((b) => `
     <tr>
       <td>#${b.id}</td>
@@ -2048,10 +2056,10 @@ function billsPageRows(custId) {
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
-      <td class="row-actions">
+      ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="openBillForm(${custId}, ${b.id})">تعديل</button>
         <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
-      </td>
+      </td>` : ""}
     </tr>`).join("");
 }
 function billsSearchInput(custId, val) {
@@ -2065,14 +2073,14 @@ function renderBillsPage(custId) {
     ${subpageHeader(custId, "الفواتير")}
     <div class="section-head">
       <p class="info-line" style="margin:0">إجمالي الفواتير: <b>${fmtMoney(totalBills(custId))}</b> — العدد: <b>${count.toLocaleString("ar-EG")}</b></p>
-      <button class="btn btn-primary btn-sm" onclick="openBillForm(${custId})">+ إضافة فاتورة</button>
+      ${canEdit() ? `<button class="btn btn-primary btn-sm" onclick="openBillForm(${custId})">+ إضافة فاتورة</button>` : ""}
     </div>
     <div class="search-bar">
       <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${billsSearchQuery.replace(/"/g, "&quot;")}" oninput="billsSearchInput(${custId}, this.value)" />
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th>${canEdit() ? "<th>إجراءات</th>" : ""}</tr></thead>
         <tbody id="bills-body">${billsPageRows(custId)}</tbody>
       </table>
     </div>`;
@@ -2095,27 +2103,27 @@ function renderPaymentsPage(custId) {
       <td>${kindBadge(kindOf(p))}</td>
       <td class="num">${fmtMoney(p.amount)}</td>
       <td>${desc}</td>
-      <td class="row-actions">
+      ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="${editCall}">تعديل</button>
         <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">حذف</button>
-      </td>
+      </td>` : ""}
     </tr>`;
   }).join("") :
-    '<tr><td colspan="7" class="empty-msg">لا توجد حركات.</td></tr>';
+    `<tr><td colspan="${canEdit() ? 7 : 6}" class="empty-msg">لا توجد حركات.</td></tr>`;
   return `
     ${subpageHeader(custId, "الدفعات والحركات")}
     <div class="section-head">
       <p class="info-line" style="margin:0">إجمالي الحركات الدائنة: <b>${fmtMoney(totalPayments(custId))}</b> — العدد: <b>${payments.length.toLocaleString("ar-EG")}</b></p>
-      <div class="btn-group">
+      ${canEdit() ? `<div class="btn-group">
         <button class="btn btn-success btn-sm" onclick="openPaymentForm(${custId})">+ إضافة دفعة</button>
         <button class="btn btn-outline btn-sm" onclick="openDiscountForm(${custId})">+ إضافة خصم</button>
         <button class="btn btn-transfer btn-sm" onclick="openTransferForm(${custId})">+ إضافة ترحيل</button>
         <button class="btn btn-warning btn-sm" onclick="openReturnForm(${custId})">+ إضافة مرتجع</button>
-      </div>
+      </div>` : ""}
     </div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>رقم</th><th>رقم الدفعة</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>ملاحظة</th><th>إجراءات</th></tr></thead>
+        <thead><tr><th>رقم</th><th>رقم الدفعة</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>ملاحظة</th>${canEdit() ? "<th>إجراءات</th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -2267,7 +2275,7 @@ function renderClientProfile(custId) {
 
     <h4 class="nav-cards-title">سجلات العميل</h4>
     <div class="nav-cards">
-      ${navCard("bills", "🧾", "الفواتير", "عرض وتعديل وحذف — " + s.numBills.toLocaleString("ar-EG") + " فاتورة")}
+      ${navCard("bills", "🧾", "الفواتير", (canEdit() ? "عرض وتعديل وحذف — " : "عرض — ") + s.numBills.toLocaleString("ar-EG") + " فاتورة")}
       ${navCard("payments", "💵", "الدفعات والحركات", "دفعات وترحيل وخصم ومرتجع — " + s.numPayments.toLocaleString("ar-EG") + " حركة")}
       ${navCard("statement", "📊", "كشف الحساب", "الحركة الكاملة والرصيد الجاري")}
       ${navCard("analytics", "📈", "التحليلات", "أبرز الأصناف والنشاط الشهري")}
