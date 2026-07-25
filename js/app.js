@@ -290,6 +290,8 @@ async function commitCustomer(editId, name) {
       await Store.updateCustomer(editId, name);
       closeModal(); toast("تم تعديل بيانات العميل");
       if (currentUser && currentUser.role === "manager") renderManager();
+      // حدّث ملف العميل المعروض حالياً ليظهر الاسم الجديد فوراً
+      if (profileCustId === editId && !$("#client-view").classList.contains("hidden")) renderProfileInto(editId);
     } else {
       await Store.addCustomer(name);
       closeModal(); toast("تمت إضافة العميل");
@@ -1193,7 +1195,7 @@ function openPaymentForm(custId, editId, kind) {
     ${dateFieldHTML(editing, pay)}
     <div class="field">
       <label>${def.label}</label>
-      <input type="number" id="pay-amount" min="0" placeholder="0" value="${editing ? pay.amount : ""}" />
+      <input type="number" id="pay-amount"${(currentUser && currentUser.role === "manager") ? "" : ' min="0"'} placeholder="0" value="${editing ? pay.amount : ""}" />
     </div>
     <div class="field">
       <label>رقم ال${def.docWord || def.word} (${def.docReq ? "إلزامي" : "اختياري"})</label>
@@ -1216,8 +1218,10 @@ function savePayment(custId, editId, kind) {
   const amount = Number($("#pay-amount").value) || 0;
   const note = $("#pay-note").value.trim();
   const docNo = ($("#pay-docno") ? $("#pay-docno").value : "").trim();
-  if (amount <= 0) {
-    toast("الرجاء إدخال مبلغ صحيح", true);
+  // المدير يستطيع إدخال مبلغ بالسالب (تصحيح/عكس دفعة) — يُمنع الصفر فقط
+  const allowNeg = currentUser && currentUser.role === "manager";
+  if (allowNeg ? amount === 0 : amount <= 0) {
+    toast(allowNeg ? "لا يمكن أن يكون المبلغ صفراً" : "الرجاء إدخال مبلغ صحيح", true);
     return;
   }
   if (AMOUNT_KINDS[kind].docReq && !docNo) {
@@ -2343,6 +2347,7 @@ function renderClientProfile(custId) {
         <h2 class="profile-name">${c.name}</h2>
         <div class="profile-meta">رقم العميل: ${c.id.toLocaleString("ar-EG")} &nbsp;•&nbsp; ${statusBadge}</div>
       </div>
+      ${canEdit() ? `<button class="btn btn-outline btn-sm" style="margin-inline-start:auto" onclick="editCustomerForm(${c.id})">✎ تعديل الاسم</button>` : ""}
     </div>
 
     <div class="stats-row">
