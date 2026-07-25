@@ -23,6 +23,8 @@ function isSupervisor(u) { u = u || currentUser; return !!u && u.role !== "manag
 function isManagerView(u) { u = u || currentUser; return !!u && (u.role === "manager" || isSupervisor(u)); }
 /* هل يملك صلاحية التعديل/الإضافة/الحذف على البيانات؟ (المدير فقط) */
 function canEdit(u) { u = u || currentUser; return !!u && u.role === "manager"; }
+/* من يدخل مباشرةً دون انتظار موافقة (المدير، المشرف، وعارض الفواتير worker4) */
+function skipsLoginApproval(u) { u = u || currentUser; return isManagerView(u) || isBillsViewer(u); }
 function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && u.username !== BILLS_VIEWER_USERNAME && !isSupervisor(u); }
 
 /* ---------- أدوات مساعدة ---------- */
@@ -353,8 +355,8 @@ $("#login-form").addEventListener("submit", async (e) => {
     currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     $("#login-form").reset();
     try { localStorage.removeItem(APPROVED_KEY); } catch (er) {}
-    // المدير والمشرف يدخلان مباشرة؛ بقية الموظفين ينتظرون موافقة المدير
-    if (!isManagerView()) {
+    // المدير والمشرف وعارض الفواتير يدخلون مباشرة؛ بقية الموظفين ينتظرون الموافقة
+    if (!skipsLoginApproval()) {
       let reqId = null;
       try {
         const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo());
@@ -430,7 +432,7 @@ async function forcedLogout() {
     // الموظف يحتاج موافقة إن لم يكن قد وُوفق على جلسته
     let approved = false;
     try { approved = localStorage.getItem(APPROVED_KEY) === "1"; } catch (e) {}
-    if (!isManagerView() && !approved) {
+    if (!skipsLoginApproval() && !approved) {
       let reqId = null;
       try { const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo()); reqId = r && r.id; } catch (er) { reqId = null; }
       if (reqId != null) { startWaiting(reqId); return; }
