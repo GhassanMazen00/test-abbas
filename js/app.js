@@ -854,6 +854,7 @@ function renderViewerProfile(custId) {
    (رقم الفاتورة، التاريخ، الأصناف، المقاس، السعر) — دون عدد القطع أو الإجمالي
    ========================================================= */
 let bvProfileId = null;
+let bvBillsQuery = "";
 function doBillsViewSearch() {
   const q = $("#bv-search").value.trim();
   const box = $("#bv-results");
@@ -871,8 +872,10 @@ function billsViewBackToSearch() {
   $("#bv-search-panel").classList.remove("hidden");
 }
 function billsViewRows(custId) {
-  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  if (!bills.length) return '<tr><td colspan="5" class="empty-msg">لا توجد فواتير.</td></tr>';
+  const bills = billsOf(custId).slice()
+    .filter((b) => billMatchesQuery(b, bvBillsQuery))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!bills.length) return '<tr><td colspan="5" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
   return bills.map((b) => `
     <tr>
       <td class="num">${docCell(b.docNo)}</td>
@@ -882,8 +885,14 @@ function billsViewRows(custId) {
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
     </tr>`).join("");
 }
+function billsViewInput(val) {
+  bvBillsQuery = val;
+  const tb = $("#bv-bills-body");
+  if (tb) tb.innerHTML = billsViewRows(bvProfileId);
+}
 function openBillsViewProfile(custId) {
   bvProfileId = custId;
+  bvBillsQuery = "";
   renderBillsViewProfile(custId);
   $("#bv-search-panel").classList.add("hidden");
   $("#bv-profile-panel").classList.remove("hidden");
@@ -900,10 +909,13 @@ function renderBillsViewProfile(custId) {
         <div class="profile-meta">الفواتير</div>
       </div>
     </div>
+    <div class="search-bar">
+      <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${bvBillsQuery.replace(/"/g, "&quot;")}" oninput="billsViewInput(this.value)" />
+    </div>
     <div class="table-wrap">
       <table class="data">
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th></tr></thead>
-        <tbody>${billsViewRows(custId)}</tbody>
+        <tbody id="bv-bills-body">${billsViewRows(custId)}</tbody>
       </table>
     </div>`;
 }
