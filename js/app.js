@@ -12,15 +12,18 @@ let currentUser = null;
 const REVIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.REVIEWER_USERNAME) || "worker2";
 const VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.VIEWER_USERNAME) || "worker3";
 const SUPERVISOR_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.SUPERVISOR_USERNAME) || "odai";
+const BILLS_VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.BILLS_VIEWER_USERNAME) || "worker4";
 function isReviewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === REVIEWER_USERNAME; }
 function isViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === VIEWER_USERNAME; }
+/* عرض الفواتير فقط (worker4): بحث عميل ثم فواتيره بأعمدة محدودة */
+function isBillsViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === BILLS_VIEWER_USERNAME; }
 /* المشرف: يرى واجهة المدير كاملة لكن للقراءة فقط (يُحدَّد بالدور supervisor أو باسم المستخدم) */
 function isSupervisor(u) { u = u || currentUser; return !!u && u.role !== "manager" && (u.role === "supervisor" || u.username === SUPERVISOR_USERNAME); }
 /* هل يرى المستخدم لوحة المدير؟ (المدير أو المشرف) */
 function isManagerView(u) { u = u || currentUser; return !!u && (u.role === "manager" || isSupervisor(u)); }
 /* هل يملك صلاحية التعديل/الإضافة/الحذف على البيانات؟ (المدير فقط) */
 function canEdit(u) { u = u || currentUser; return !!u && u.role === "manager"; }
-function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && !isSupervisor(u); }
+function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && u.username !== BILLS_VIEWER_USERNAME && !isSupervisor(u); }
 
 /* ---------- أدوات مساعدة ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -201,7 +204,7 @@ function openMonthBills(key) {
 
 /* إظهار واجهة واحدة فقط من واجهات التطبيق */
 function showOnlyView(viewId) {
-  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view", "viewer-view"].forEach((v) => {
+  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view", "viewer-view", "billsview-view"].forEach((v) => {
     const el = document.getElementById(v);
     if (el) el.classList.toggle("hidden", v !== viewId);
   });
@@ -474,7 +477,7 @@ function startApp() {
   $("#login-screen").classList.add("hidden");
   $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  const roleLabel = currentUser.role === "manager" ? "المدير" : (isSupervisor() ? "مشرف" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : "الموظف")));
+  const roleLabel = currentUser.role === "manager" ? "المدير" : (isSupervisor() ? "مشرف" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : (isBillsViewer() ? "عرض الفواتير" : "الموظف"))));
   $("#current-user").textContent = roleLabel + ": " + currentUser.username;
 
   if (isManagerView()) {
@@ -492,6 +495,11 @@ function startApp() {
     viewerBackToSearch();
     $("#viewer-search").value = "";
     $("#viewer-results").innerHTML = '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
+  } else if (isBillsViewer()) {
+    showOnlyView("billsview-view");
+    billsViewBackToSearch();
+    $("#bv-search").value = "";
+    $("#bv-results").innerHTML = '<p class="empty-msg">اكتب اسم العميل في الأعلى ثم اضغط بحث.</p>';
   } else {
     showOnlyView("employee-view");
     empShow("add");
@@ -839,6 +847,70 @@ function renderViewerProfile(custId) {
   const btn = $("#viewer-search-btn"), inp = $("#viewer-search");
   if (btn) btn.addEventListener("click", doViewerSearch);
   if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doViewerSearch(); });
+})();
+
+/* =========================================================
+   واجهة عرض الفواتير فقط (worker4): بحث عميل ثم فواتيره بأعمدة محدودة
+   (رقم الفاتورة، التاريخ، الأصناف، المقاس، السعر) — دون عدد القطع أو الإجمالي
+   ========================================================= */
+let bvProfileId = null;
+function doBillsViewSearch() {
+  const q = $("#bv-search").value.trim();
+  const box = $("#bv-results");
+  if (!q) { box.innerHTML = '<p class="empty-msg">الرجاء كتابة اسم العميل للبحث.</p>'; return; }
+  const matches = matchCustomers(q);
+  if (!matches.length) { box.innerHTML = '<p class="empty-msg">لا يوجد عميل بهذا الاسم.</p>'; return; }
+  box.innerHTML = matches.map((c) => `
+    <div class="result-card clickable-row" onclick="openBillsViewProfile(${c.id})">
+      <div class="result-name">${c.name}</div>
+      <div class="result-actions"><span class="nav-cell">عرض ›</span></div>
+    </div>`).join("");
+}
+function billsViewBackToSearch() {
+  $("#bv-profile-panel").classList.add("hidden");
+  $("#bv-search-panel").classList.remove("hidden");
+}
+function billsViewRows(custId) {
+  const bills = billsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!bills.length) return '<tr><td colspan="5" class="empty-msg">لا توجد فواتير.</td></tr>';
+  return bills.map((b) => `
+    <tr>
+      <td class="num">${docCell(b.docNo)}</td>
+      <td>${fmtDate(b.date)}</td>
+      <td>${b.items.map((it) => it.description || "—").join("<br>")}</td>
+      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
+      <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
+    </tr>`).join("");
+}
+function openBillsViewProfile(custId) {
+  bvProfileId = custId;
+  renderBillsViewProfile(custId);
+  $("#bv-search-panel").classList.add("hidden");
+  $("#bv-profile-panel").classList.remove("hidden");
+  window.scrollTo(0, 0);
+}
+function renderBillsViewProfile(custId) {
+  const c = customerById(custId);
+  if (!c) return;
+  $("#bv-profile-content").innerHTML = `
+    <div class="profile-header">
+      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div>
+        <h2 class="profile-name">${c.name}</h2>
+        <div class="profile-meta">الفواتير</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th></tr></thead>
+        <tbody>${billsViewRows(custId)}</tbody>
+      </table>
+    </div>`;
+}
+(function () {
+  const btn = $("#bv-search-btn"), inp = $("#bv-search");
+  if (btn) btn.addEventListener("click", doBillsViewSearch);
+  if (inp) inp.addEventListener("keydown", (e) => { if (e.key === "Enter") doBillsViewSearch(); });
 })();
 
 /* ---------- طلبات الدخول (جهة المدير) ---------- */
