@@ -383,6 +383,9 @@ table.data th {
 }
 table.data tr:last-child td { border-bottom: none; }
 table.data tbody tr { transition: background .12s ease; }
+/* تبديل ألوان صفوف الفواتير (أبيض/رمادي) — يعمل في الوضعين الفاتح والليلي */
+table.data.zebra tbody tr:nth-child(even) td { background: #e7e9ee; }
+:root[data-theme="dark"] table.data.zebra tbody tr:nth-child(even) td { background: #2c2c31; }
 table.data tbody tr:hover td { background: var(--primary-soft); }
 .clickable-row { cursor: pointer; }
 .data th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }

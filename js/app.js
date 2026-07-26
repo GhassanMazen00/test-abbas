@@ -186,7 +186,7 @@ function showBillsModal(title, bills) {
   openModal(title, `
     <p class="info-line">عدد الفواتير: <b>${bills.length.toLocaleString("ar-EG")}</b> — الإجمالي: <b>${fmtMoney(total)}</b></p>
     <div class="table-wrap">
-      <table class="data">
+      <table class="data zebra">
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>اسم العميل</th><th>قيمة الفاتورة</th></tr></thead>
         <tbody>${billRowsCompact(bills)}</tbody>
       </table>
@@ -832,7 +832,7 @@ function renderViewerProfile(custId) {
         <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${viewerBillsQuery.replace(/"/g, "&quot;")}" oninput="viewerBillsInput(this.value)" />
       </div>
       <div class="table-wrap">
-        <table class="data">
+        <table class="data zebra">
           <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th></tr></thead>
           <tbody id="vp-bills-body">${viewerBillRows(custId)}</tbody>
         </table>
@@ -917,7 +917,7 @@ function renderBillsViewProfile(custId) {
       <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${bvBillsQuery.replace(/"/g, "&quot;")}" oninput="billsViewInput(this.value)" />
     </div>
     <div class="table-wrap">
-      <table class="data">
+      <table class="data zebra">
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th></tr></thead>
         <tbody id="bv-bills-body">${billsViewRows(custId)}</tbody>
       </table>
@@ -1517,7 +1517,7 @@ function renderAllBillsTab() {
     </div>
     <p class="info-line">بحث في كل فواتير النظام (<b>${DB.bills.length.toLocaleString("ar-EG")}</b> فاتورة) حسب رقم الفاتورة أو اسم الصنف${q ? ` — <b>${count.toLocaleString("ar-EG")}</b> نتيجة` : ""}. اضغط على الفاتورة لفتح ملف العميل.</p>
     <div class="table-wrap">
-      <table class="data">
+      <table class="data zebra">
         <thead><tr><th>رقم الفاتورة</th><th>التاريخ</th><th>العميل</th><th>الأصناف</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody id="allbills-body">${allBillsRows()}</tbody>
       </table>
@@ -2177,7 +2177,7 @@ function renderBillsPage(custId) {
       <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${billsSearchQuery.replace(/"/g, "&quot;")}" oninput="billsSearchInput(${custId}, this.value)" />
     </div>
     <div class="table-wrap">
-      <table class="data">
+      <table class="data zebra">
         <thead><tr><th>رقم</th><th>رقم الكشف</th><th>التاريخ</th><th>الأصناف</th><th>المقاس</th><th>السعر</th><th>عدد القطع</th><th>الإجمالي</th>${canEdit() ? "<th>إجراءات</th>" : ""}</tr></thead>
         <tbody id="bills-body">${billsPageRows(custId)}</tbody>
       </table>
