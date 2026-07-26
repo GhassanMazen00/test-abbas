@@ -531,6 +531,14 @@ function entryHasItems(e) { return Array.isArray(e.payload.items) && e.payload.i
 function entryAmount(e) {
   return e.payload.total != null ? e.payload.total : (e.payload.amount || 0);
 }
+/* الرقم العددي للإدخال (رقم الفاتورة/الدفعة) للفرز — يدعم الأرقام العربية، وما بلا رقم يُوضع آخراً */
+function entryDocNum(e) {
+  const raw = String((e.payload && e.payload.docNo) || "");
+  const map = { "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9" };
+  let s = "";
+  for (const ch of raw) { if (map[ch] !== undefined) s += map[ch]; else if (/[0-9]/.test(ch)) s += ch; }
+  return s === "" ? Infinity : parseInt(s, 10);
+}
 function entryDetail(e) {
   const doc = e.payload.docNo ? ("رقم: " + e.payload.docNo) : "بدون رقم";
   if (entryHasItems(e)) {
@@ -601,7 +609,9 @@ function showRejectedDetails(id) {
 
 /* --------- جهة المراجِع (worker2) --------- */
 function renderReview() {
-  const rows = pendingEntries.length ? pendingEntries.map((e) => `
+  // ترتيب حسب رقم الفاتورة/الدفعة تصاعدياً (الأصغر أولاً)، وما بلا رقم يأتي آخراً
+  const sorted = pendingEntries.slice().sort((a, b) => (entryDocNum(a) - entryDocNum(b)) || (a.id - b.id));
+  const rows = sorted.length ? sorted.map((e) => `
     <tr class="clickable-row" onclick="showEntryDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
       <td>${e.customerName || "—"}</td>
