@@ -1626,9 +1626,8 @@ function clientsRows() {
   }).join("");
 }
 function renderClientsTab() {
-  // إجمالي المبالغ المستحقة لنا: مجموع الأرصدة المدينة فقط (ما يدين به العملاء)
-  // لا تُخصم الأرصدة الدائنة (الودائع/ما ندين به لهم)، لكن الدفعات مطروحة ضمن الرصيد
-  const totalOutstanding = DB.customers.reduce((s, c) => { const b = balanceOf(c.id); return b > 0 ? s + b : s; }, 0);
+  // صافي المستحق: يطرح أرصدة العملاء الدائنة (المدفوع مقدماً) ليطابق كشف الإجمالي
+  const totalOutstanding = DB.customers.reduce((s, c) => s + balanceOf(c.id), 0);
 
   $("#tab-clients").innerHTML = `
     <div class="stats-row">
@@ -2035,7 +2034,22 @@ function statementRows() {
   }).join("");
 }
 function renderStatementTab() {
+  // إجمالي المبالغ المستحقة لنا: مجموع أرصدة العملاء المدينين فقط (من يدين لنا)
+  // لا تتأثر بأي أرصدة دائنة/ودائع (لا نطرح ما ندين به لأحد)؛ الدفعات مطروحة ضمن الرصيد
+  const owedToUs = DB.customers.reduce((s, c) => { const b = balanceOf(c.id); return b > 0 ? s + b : s; }, 0);
+  const debtorCount = DB.customers.reduce((n, c) => n + (balanceOf(c.id) > 0 ? 1 : 0), 0);
   $("#tab-statement").innerHTML = `
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">إجمالي المبالغ المستحقة (المستحق لنا)</div>
+        <div class="stat-value pos">${fmtMoney(owedToUs)}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">عدد العملاء المدينين</div>
+        <div class="stat-value">${debtorCount.toLocaleString("ar-EG")}</div>
+      </div>
+    </div>
+    <p class="info-line" style="margin-top:-6px">يشمل فقط ما يدين به العملاء لنا؛ لا يتأثر بالأرصدة الدائنة أو الودائع (المدفوعة مقدماً).</p>
     <div class="search-bar">
       <input type="text" id="statement-search" placeholder="ابحث باسم العميل..." value="${statementQuery.replace(/"/g, "&quot;")}" />
     </div>
