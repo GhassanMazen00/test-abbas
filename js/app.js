@@ -24,7 +24,8 @@ function isManagerView(u) { u = u || currentUser; return !!u && (u.role === "man
 /* هل يملك صلاحية التعديل/الإضافة/الحذف على البيانات؟ (المدير فقط) */
 function canEdit(u) { u = u || currentUser; return !!u && u.role === "manager"; }
 /* من يدخل مباشرةً دون انتظار موافقة (المدير، المشرف، وعارض الفواتير worker4) */
-function skipsLoginApproval(u) { u = u || currentUser; return isManagerView(u) || isBillsViewer(u); }
+/* بعد الساعة 6 مساءً (توقيت مصر) يحتاج عارض الفواتير أيضاً موافقة للدخول */
+function skipsLoginApproval(u) { u = u || currentUser; return isManagerView(u) || (isBillsViewer(u) && cairoHour() < 18); }
 function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && u.username !== BILLS_VIEWER_USERNAME && !isSupervisor(u); }
 
 /* ---------- أدوات مساعدة ---------- */
@@ -73,6 +74,9 @@ function fmtDateTime(iso) {
 /* مُنسّق مُخزَّن مسبقاً — أسرع بكثير من إنشاء منسّق جديد في كل نداء */
 const _cairoDayFmt = new Intl.DateTimeFormat("en-CA", { timeZone: APP_TZ, year: "numeric", month: "2-digit", day: "2-digit" });
 function cairoDayKey(iso) { return _cairoDayFmt.format(new Date(iso)); }
+/* الساعة الحالية بتوقيت مصر (0–23) — تُستخدم لقاعدة 6 مساءً */
+const _cairoHourFmt = new Intl.DateTimeFormat("en-GB", { timeZone: APP_TZ, hour: "2-digit", hourCycle: "h23" });
+function cairoHour() { return parseInt(_cairoHourFmt.format(new Date()), 10) || 0; }
 function cairoMonthKey(iso) { return cairoDayKey(iso).slice(0, 7); }
 function customerById(id) {
   return DB.customers.find((c) => c.id === id);
@@ -333,6 +337,10 @@ function deviceInfo() {
 }
 
 const APPROVED_KEY = "az_login_approved";
+/* علامة الموافقة تُخزَّن في sessionStorage فتُمحى تلقائياً عند إغلاق التبويب/المتصفح
+   أو إطفاء الجهاز — فيلزم الموظف موافقة جديدة عند إعادة الفتح */
+function setApproved(v) { try { if (v) sessionStorage.setItem(APPROVED_KEY, "1"); else sessionStorage.removeItem(APPROVED_KEY); } catch (e) {} }
+function isApprovedFlag() { try { return sessionStorage.getItem(APPROVED_KEY) === "1"; } catch (e) { return false; } }
 let pendingRequests = [];
 let reqPollTimer = null;
 let waitTimer = null;
@@ -356,7 +364,7 @@ $("#login-form").addEventListener("submit", async (e) => {
     const sess = await Store.signIn(u, p);
     currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     $("#login-form").reset();
-    try { localStorage.removeItem(APPROVED_KEY); } catch (er) {}
+    setApproved(false);
     // المدير والمشرف وعارض الفواتير يدخلون مباشرة؛ بقية الموظفين ينتظرون الموافقة
     if (!skipsLoginApproval()) {
       let reqId = null;
@@ -379,9 +387,10 @@ $("#logout-btn").addEventListener("click", async () => {
   stopReviewPolling();
   stopMakerPolling();
   stopSessionTracking();
+  stopSixPmWatch();
   try { if (sessionId != null) await Store.endSession(sessionId); } catch (e) {}
   sessionId = null;
-  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+  setApproved(false);
   await Store.signOut();
   currentUser = null;
   $("#app").classList.add("hidden");
@@ -405,6 +414,28 @@ function stopSessionTracking() {
   if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
   if (sessSelfTimer) { clearInterval(sessSelfTimer); sessSelfTimer = null; }
 }
+/* ---------- تسجيل خروج تلقائي للموظفين الساعة 6 مساءً (توقيت مصر) ---------- */
+let sixPmTimer = null, loggedInBeforeSix = false;
+function startSixPmWatch() {
+  stopSixPmWatch();
+  if (isManagerView()) return; // المدير والمشرف لا يُخرَجان
+  loggedInBeforeSix = cairoHour() < 18;
+  sixPmTimer = setInterval(() => {
+    if (loggedInBeforeSix && cairoHour() >= 18) { loggedInBeforeSix = false; autoLogoutSixPm(); }
+  }, 30000);
+}
+function stopSixPmWatch() { if (sixPmTimer) { clearInterval(sixPmTimer); sixPmTimer = null; } }
+async function autoLogoutSixPm() {
+  stopSixPmWatch(); stopSessionTracking(); stopRequestPolling(); stopReviewPolling(); stopMakerPolling();
+  try { if (sessionId != null) await Store.endSession(sessionId); } catch (e) {}
+  sessionId = null;
+  setApproved(false);
+  try { await Store.signOut(); } catch (e) {}
+  currentUser = null;
+  $("#app").classList.add("hidden");
+  $("#login-screen").classList.remove("hidden");
+  $("#login-error").textContent = "تم تسجيل خروجك تلقائياً الساعة 6 مساءً — يلزم موافقة المدير للدخول مجدداً";
+}
 async function checkOwnSession() {
   if (sessionId == null) return;
   let st;
@@ -412,9 +443,9 @@ async function checkOwnSession() {
   if (st === "signed_out" || st === "gone") await forcedLogout();
 }
 async function forcedLogout() {
-  stopSessionTracking();
+  stopSessionTracking(); stopSixPmWatch();
   stopRequestPolling(); stopReviewPolling(); stopMakerPolling();
-  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+  setApproved(false);
   try { if (sessionId != null) await Store.endSession(sessionId); } catch (e) {}
   sessionId = null;
   try { await Store.signOut(); } catch (e) {}
@@ -432,8 +463,7 @@ async function forcedLogout() {
     if (!sess) return;
     currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     // الموظف يحتاج موافقة إن لم يكن قد وُوفق على جلسته
-    let approved = false;
-    try { approved = localStorage.getItem(APPROVED_KEY) === "1"; } catch (e) {}
+    const approved = isApprovedFlag();
     if (!skipsLoginApproval() && !approved) {
       let reqId = null;
       try { const r = await Store.createLoginRequest(sess.userId, sess.username, deviceInfo()); reqId = r && r.id; } catch (er) { reqId = null; }
@@ -454,12 +484,12 @@ function startWaiting(reqId) {
     try { st = await Store.getLoginRequestStatus(reqId); } catch (e) { return; }
     if (st === "approved") {
       clearInterval(waitTimer); waitTimer = null;
-      try { localStorage.setItem(APPROVED_KEY, "1"); } catch (e) {}
+      setApproved(true);
       $("#waiting-screen").classList.add("hidden");
       await finishLogin();
     } else if (st === "rejected") {
       clearInterval(waitTimer); waitTimer = null;
-      try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+      setApproved(false);
       await Store.signOut();
       currentUser = null;
       $("#waiting-screen").classList.add("hidden");
@@ -470,7 +500,7 @@ function startWaiting(reqId) {
 }
 async function cancelWaiting() {
   if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
-  try { localStorage.removeItem(APPROVED_KEY); } catch (e) {}
+  setApproved(false);
   try { await Store.signOut(); } catch (e) {}
   currentUser = null;
   $("#waiting-screen").classList.add("hidden");
@@ -513,6 +543,7 @@ function startApp() {
     startMakerPolling();
   }
   startSessionTracking();
+  startSixPmWatch();
 }
 
 /* =========================================================
@@ -754,9 +785,14 @@ function viewerBackToSearch() {
 let viewerTab = "bills";
 let viewerBillsQuery = "";
 let viewerProfileId = null;
+let viewerFrom = "", viewerTo = "";
+function viewerInRange(date) {
+  const k = cairoDayKey(date);
+  return (!viewerFrom || k >= viewerFrom) && (!viewerTo || k <= viewerTo);
+}
 function viewerBillRows(custId) {
   const bills = billsOf(custId).slice()
-    .filter((b) => billMatchesQuery(b, viewerBillsQuery))
+    .filter((b) => viewerInRange(b.date) && billMatchesQuery(b, viewerBillsQuery))
     .sort((a, b) => new Date(b.date) - new Date(a.date));
   if (!bills.length) return '<tr><td colspan="7" class="empty-msg">لا توجد فواتير مطابقة.</td></tr>';
   return bills.map((b) => `
@@ -770,14 +806,47 @@ function viewerBillRows(custId) {
       <td class="num">${fmtMoney(b.total)}</td>
     </tr>`).join("");
 }
+function viewerPayRows(custId) {
+  const payments = paymentsOf(custId).slice()
+    .filter((p) => viewerInRange(p.date))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!payments.length) return '<tr><td colspan="5" class="empty-msg">لا توجد حركات.</td></tr>';
+  return payments.map((p) => {
+    const isRet = kindOf(p) === "return";
+    const desc = (isRet && p.items && p.items.length)
+      ? p.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
+      : (p.note || "—");
+    return `
+    <tr>
+      <td class="num">${docCell(p.docNo)}</td>
+      <td>${fmtDate(p.date)}</td>
+      <td>${kindBadge(kindOf(p))}</td>
+      <td class="num">${fmtMoney(p.amount)}</td>
+      <td>${desc}</td>
+    </tr>`;
+  }).join("");
+}
 function viewerBillsInput(val) {
   viewerBillsQuery = val;
   const tb = $("#vp-bills-body");
   if (tb) tb.innerHTML = viewerBillRows(viewerProfileId);
 }
+function viewerDateChanged() {
+  const f = $("#vp-from"), t = $("#vp-to");
+  if (f) viewerFrom = f.value;
+  if (t) viewerTo = t.value;
+  const bt = $("#vp-bills-body"); if (bt) bt.innerHTML = viewerBillRows(viewerProfileId);
+  const pt = $("#vp-pays-body"); if (pt) pt.innerHTML = viewerPayRows(viewerProfileId);
+}
+function clearViewerDate() {
+  viewerFrom = ""; viewerTo = "";
+  const f = $("#vp-from"), t = $("#vp-to"); if (f) f.value = ""; if (t) t.value = "";
+  viewerDateChanged();
+}
 function openViewerProfile(custId) {
   viewerTab = "bills";
   viewerBillsQuery = "";
+  viewerFrom = ""; viewerTo = "";
   viewerProfileId = custId;
   renderViewerProfile(custId);
   $("#viewer-search-panel").classList.add("hidden");
@@ -800,21 +869,6 @@ function renderViewerProfile(custId) {
     ? '<span class="badge badge-danger">مستحق عليه</span>'
     : '<span class="badge badge-success">مسدَّد بالكامل</span>';
   const bills = billsOf(custId);
-  const payments = paymentsOf(custId).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-  const payRows = payments.length ? payments.map((p) => {
-    const isRet = kindOf(p) === "return";
-    const desc = (isRet && p.items && p.items.length)
-      ? p.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
-      : (p.note || "—");
-    return `
-    <tr>
-      <td class="num">${docCell(p.docNo)}</td>
-      <td>${fmtDate(p.date)}</td>
-      <td>${kindBadge(kindOf(p))}</td>
-      <td class="num">${fmtMoney(p.amount)}</td>
-      <td>${desc}</td>
-    </tr>`;
-  }).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد حركات.</td></tr>';
   $("#viewer-profile-content").innerHTML = `
     <div class="profile-header">
       <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
@@ -832,6 +886,11 @@ function renderViewerProfile(custId) {
         <div class="stat-label">عدد الفواتير</div>
         <div class="stat-value">${bills.length.toLocaleString("ar-EG")}</div>
       </div>
+    </div>
+    <div class="filter-bar">
+      <label>من تاريخ <input type="date" id="vp-from" value="${viewerFrom}" onchange="viewerDateChanged()" /></label>
+      <label>إلى تاريخ <input type="date" id="vp-to" value="${viewerTo}" onchange="viewerDateChanged()" /></label>
+      <button class="btn btn-outline btn-sm" onclick="clearViewerDate()">مسح التاريخ</button>
     </div>
     <nav class="tabs">
       <button class="tab ${viewerTab === "bills" ? "active" : ""}" data-vtab="bills" onclick="viewerShow('bills')">الفواتير</button>
@@ -852,7 +911,7 @@ function renderViewerProfile(custId) {
       <div class="table-wrap">
         <table class="data">
           <thead><tr><th>رقم الدفعة</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>البيان</th></tr></thead>
-          <tbody>${payRows}</tbody>
+          <tbody id="vp-pays-body">${viewerPayRows(custId)}</tbody>
         </table>
       </div>
     </div>`;
@@ -1567,8 +1626,9 @@ function clientsRows() {
   }).join("");
 }
 function renderClientsTab() {
-  // صافي المستحق: يطرح أرصدة العملاء الدائنة (المدفوع مقدماً) ليطابق كشف الإجمالي
-  const totalOutstanding = DB.customers.reduce((s, c) => s + balanceOf(c.id), 0);
+  // إجمالي المبالغ المستحقة لنا: مجموع الأرصدة المدينة فقط (ما يدين به العملاء)
+  // لا تُخصم الأرصدة الدائنة (الودائع/ما ندين به لهم)، لكن الدفعات مطروحة ضمن الرصيد
+  const totalOutstanding = DB.customers.reduce((s, c) => { const b = balanceOf(c.id); return b > 0 ? s + b : s; }, 0);
 
   $("#tab-clients").innerHTML = `
     <div class="stats-row">
