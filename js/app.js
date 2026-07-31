@@ -360,17 +360,52 @@ async function finishLogin() {
   startApp();
 }
 
+/* ---------- CAPTCHA (Cloudflare Turnstile) — يعمل فقط عند ضبط CAPTCHA_SITE_KEY ---------- */
+const CAPTCHA_SITE_KEY = (window.APP_CONFIG && window.APP_CONFIG.CAPTCHA_SITE_KEY) || "";
+let _captchaToken = null, _captchaWidgetId = null;
+function captchaEnabled() { return !!CAPTCHA_SITE_KEY; }
+function initCaptcha() {
+  if (!captchaEnabled()) return; // مُعطّل: لا يظهر شيء ولا يتغيّر سلوك الدخول
+  if (!document.getElementById("cf-turnstile-script")) {
+    const s = document.createElement("script");
+    s.id = "cf-turnstile-script";
+    s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+    s.async = true; s.defer = true;
+    document.head.appendChild(s);
+  }
+  (function render() {
+    if (!(window.turnstile && $("#captcha-box"))) { setTimeout(render, 200); return; }
+    if (_captchaWidgetId !== null) return;
+    try {
+      _captchaWidgetId = window.turnstile.render("#captcha-box", {
+        sitekey: CAPTCHA_SITE_KEY,
+        callback: (t) => { _captchaToken = t; },
+        "expired-callback": () => { _captchaToken = null; },
+        "error-callback": () => { _captchaToken = null; }
+      });
+    } catch (e) {}
+  })();
+}
+function resetCaptcha() {
+  _captchaToken = null;
+  if (captchaEnabled() && window.turnstile && _captchaWidgetId !== null) {
+    try { window.turnstile.reset(_captchaWidgetId); } catch (e) {}
+  }
+}
+initCaptcha();
+
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const u = $("#username").value.trim();
   const p = $("#password").value;
   const btn = $("#login-form button[type=submit]");
   if (!u || !p) { $("#login-error").textContent = "الرجاء إدخال اسم المستخدم وكلمة المرور"; return; }
+  if (captchaEnabled() && !_captchaToken) { $("#login-error").textContent = "الرجاء إكمال التحقق (CAPTCHA) قبل الدخول"; return; }
   $("#login-error").textContent = "";
   btn.disabled = true;
   const label = btn.textContent; btn.textContent = "جارٍ الدخول...";
   try {
-    const sess = await Store.signIn(u, p);
+    const sess = await Store.signIn(u, p, _captchaToken);
     currentUser = { username: sess.username, role: sess.role, userId: sess.userId };
     $("#login-form").reset();
     setApproved(false);
@@ -388,6 +423,7 @@ $("#login-form").addEventListener("submit", async (e) => {
     $("#login-error").textContent = (err && err.message) ? err.message : "تعذّر تسجيل الدخول";
   } finally {
     btn.disabled = false; btn.textContent = label;
+    resetCaptcha(); // الرمز يُستخدم مرة واحدة → جدّده لأي محاولة تالية
   }
 });
 
