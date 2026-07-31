@@ -16,5 +16,5 @@ window.APP_CONFIG = {
   // اتركه فارغاً = مُعطّل تماماً (لا يظهر أي تحقق). ضع المفتاح لتفعيل التحقق
   // في شاشة الدخول. لا تفعّل «Captcha protection» في Supabase إلا بعد وضع
   // هذا المفتاح ونشره، وإلا ستفشل كل عمليات الدخول.
-  CAPTCHA_SITE_KEY: ""
+  CAPTCHA_SITE_KEY: "0x4AAAAAAEDHG49zj73HSKMx"
 };
