@@ -97,7 +97,16 @@ const PAY_KINDS = {
 function kindOf(p) { return PAY_KINDS[p.kind] ? p.kind : "payment"; }
 function kindLabel(k) { return (PAY_KINDS[k] || PAY_KINDS.payment).label; }
 function kindBadge(k) { const d = PAY_KINDS[k] || PAY_KINDS.payment; return `<span class="badge ${d.badge}">${d.label}</span>`; }
-function docCell(d) { return d ? String(d) : "—"; }
+/* تهريب HTML لمنع حقن السكربتات (XSS) عبر أي بيانات يُدخلها المستخدمون */
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+function docCell(d) { return d ? esc(String(d)) : "—"; }
 function sumKind(id, k) { return paymentsOf(id).filter((p) => kindOf(p) === k).reduce((s, p) => s + p.amount, 0); }
 
 const MONTH_NAMES = ["يناير","فبراير","مارس","أبريل","مايو","يونيو","يوليو","أغسطس","سبتمبر","أكتوبر","نوفمبر","ديسمبر"];
@@ -178,9 +187,9 @@ function billRowsCompact(bills) {
   return sorted.map((b) => {
     const cust = customerById(b.customerId);
     return `<tr>
-      <td class="num">${b.docNo ? b.docNo : ("#" + b.id)}</td>
+      <td class="num">${b.docNo ? esc(b.docNo) : ("#" + b.id)}</td>
       <td>${fmtDate(b.date)}</td>
-      <td>${cust ? cust.name : "—"}</td>
+      <td>${cust ? esc(cust.name) : "—"}</td>
       <td class="num">${fmtMoney(b.total)}</td>
     </tr>`;
   }).join("");
@@ -244,7 +253,7 @@ function deletePayment(id) {
 }
 function deleteCustomer(id) {
   const c = customerById(id);
-  confirmDialog("حذف العميل", `سيتم حذف العميل «${c.name}» وكل فواتيره ودفعاته. هل أنت متأكد؟`, async () => {
+  confirmDialog("حذف العميل", `سيتم حذف العميل «${esc(c.name)}» وكل فواتيره ودفعاته. هل أنت متأكد؟`, async () => {
     try { await Store.deleteCustomer(id); toast("تم حذف العميل"); renderManager(); }
     catch (e) { toast(errMsg(e, "تعذّر حذف العميل"), true); }
   }, { danger: true, yesLabel: "تأكيد الحذف" });
@@ -269,7 +278,7 @@ function customerForm(editId) {
   openModal(editing ? "تعديل عميل" : "عميل جديد", `
     <div class="field">
       <label>اسم العميل</label>
-      <input type="text" id="cust-name" placeholder="اسم العميل" value="${editing ? c.name.replace(/"/g, "&quot;") : ""}" />
+      <input type="text" id="cust-name" placeholder="اسم العميل" value="${editing ? esc(c.name) : ""}" />
     </div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="saveCustomer(${editing ? editId : "null"})">حفظ</button>
@@ -571,32 +580,32 @@ function entryDocNum(e) {
   return s === "" ? Infinity : parseInt(s, 10);
 }
 function entryDetail(e) {
-  const doc = e.payload.docNo ? ("رقم: " + e.payload.docNo) : "بدون رقم";
+  const doc = e.payload.docNo ? ("رقم: " + esc(e.payload.docNo)) : "بدون رقم";
   if (entryHasItems(e)) {
     const n = e.payload.items.reduce((s, it) => s + (Number(it.count) || 0), 0);
     return `${doc} — ${e.payload.items.length} صنف / ${n.toLocaleString("ar-EG")} قطعة`;
   }
-  return `${doc}${e.payload.note ? " — " + e.payload.note : ""}`;
+  return `${doc}${e.payload.note ? " — " + esc(e.payload.note) : ""}`;
 }
 
 /* --------- تفاصيل إدخال (فاتورة/دفعة/مرتجع) --------- */
 function entryDetailBody(e) {
   const reasonLine = e.rejectReason ? `<p class="info-line reject-reason">سبب الرفض: <b>${e.rejectReason}</b></p>` : "";
-  const meta = `<p class="info-line">المُدخِل: <b>${e.createdBy || "—"}</b> — الوقت: ${e.created_at ? fmtDateTime(e.created_at) : "—"}</p>${reasonLine}`;
+  const meta = `<p class="info-line">المُدخِل: <b>${esc(e.createdBy) || "—"}</b> — الوقت: ${e.created_at ? fmtDateTime(e.created_at) : "—"}</p>${reasonLine}`;
   if (entryHasItems(e)) {
     const items = e.payload.items;
     const rows = items.map((it) => `
       <tr>
-        <td>${it.description || "—"}</td>
-        <td>${it.size || "—"}</td>
+        <td>${esc(it.description) || "—"}</td>
+        <td>${esc(it.size) || "—"}</td>
         <td class="num">${(Number(it.count) || 0).toLocaleString("ar-EG")}</td>
         <td class="num">${fmtMoney(it.price)}</td>
         <td class="num">${fmtMoney((Number(it.count) || 0) * (Number(it.price) || 0))}</td>
       </tr>`).join("");
     const typeLabel = e.kind === "return" ? "مرتجع" : (e.kind === "cancelled" ? "فاتورة ملغية" : "فاتورة");
-    const reasonCanc = (e.kind === "cancelled" && e.payload.reason) ? `<p class="info-line">سبب الإلغاء: <b>${e.payload.reason}</b></p>` : "";
+    const reasonCanc = (e.kind === "cancelled" && e.payload.reason) ? `<p class="info-line">سبب الإلغاء: <b>${esc(e.payload.reason)}</b></p>` : "";
     return `
-      <p class="info-line">العميل: <b>${e.customerName || "—"}</b> &nbsp;•&nbsp; النوع: <b>${typeLabel}</b> &nbsp;•&nbsp; الرقم: <b>${e.payload.docNo || "—"}</b></p>
+      <p class="info-line">العميل: <b>${esc(e.customerName) || "—"}</b> &nbsp;•&nbsp; النوع: <b>${typeLabel}</b> &nbsp;•&nbsp; الرقم: <b>${esc(e.payload.docNo) || "—"}</b></p>
       <div class="table-wrap"><table class="data">
         <thead><tr><th>وصف الصنف</th><th>المقاس</th><th>العدد</th><th>السعر</th><th>الإجمالي</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -606,12 +615,12 @@ function entryDetailBody(e) {
   }
   const word = e.payload.kind === "discount" ? "خصم" : (e.kind === "return" ? "مرتجع" : "دفعة");
   return `
-    <p class="info-line">العميل: <b>${e.customerName || "—"}</b></p>
+    <p class="info-line">العميل: <b>${esc(e.customerName) || "—"}</b></p>
     <div class="detail-grid">
       <div><span>النوع</span><b>${word}</b></div>
       <div><span>القيمة</span><b>${fmtMoney(entryAmount(e))}</b></div>
-      <div><span>الرقم</span><b>${e.payload.docNo || "—"}</b></div>
-      <div><span>ملاحظة</span><b>${e.payload.note || "—"}</b></div>
+      <div><span>الرقم</span><b>${esc(e.payload.docNo) || "—"}</b></div>
+      <div><span>ملاحظة</span><b>${esc(e.payload.note) || "—"}</b></div>
     </div>
     ${meta}`;
 }
@@ -645,10 +654,10 @@ function renderReview() {
   const rows = sorted.length ? sorted.map((e) => `
     <tr class="clickable-row" onclick="showEntryDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
-      <td>${e.customerName || "—"}</td>
+      <td>${esc(e.customerName) || "—"}</td>
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
-      <td>${e.createdBy || "—"}</td>
+      <td>${esc(e.createdBy) || "—"}</td>
       <td>${e.created_at ? fmtDateTime(e.created_at) : "—"}</td>
       <td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="event.stopPropagation(); showEntryDetails(${e.id})">تفاصيل</button>
@@ -700,7 +709,7 @@ async function approveEntry(id) {
 function rejectEntry(id) {
   const e = findEntry(id);
   openModal("سبب الرفض", `
-    <p class="info-line">اكتب سبب رفض هذا الإدخال${e && e.customerName ? " (" + e.customerName + ")" : ""} ليطّلع عليه الموظف والمدير.</p>
+    <p class="info-line">اكتب سبب رفض هذا الإدخال${e && e.customerName ? " (" + esc(e.customerName) + ")" : ""} ليطّلع عليه الموظف والمدير.</p>
     <div class="field">
       <label>السبب (إلزامي)</label>
       <textarea id="reject-reason" placeholder="مثال: الكمية غير صحيحة / السعر خاطئ / مكرّر..."></textarea>
@@ -739,10 +748,10 @@ function renderRejected() {
   const rows = rejectedEntries.length ? rejectedEntries.map((e) => `
     <tr class="clickable-row" onclick="showRejectedDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
-      <td>${e.customerName || "—"}</td>
+      <td>${esc(e.customerName) || "—"}</td>
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
-      <td>${e.rejectReason ? e.rejectReason : "—"}</td>
+      <td>${e.rejectReason ? esc(e.rejectReason) : "—"}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
     </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>';
   $("#emp-rejected").innerHTML = `
@@ -774,7 +783,7 @@ function doViewerSearch() {
   if (!matches.length) { box.innerHTML = '<p class="empty-msg">لا يوجد عميل بهذا الاسم.</p>'; return; }
   box.innerHTML = matches.map((c) => `
     <div class="result-card clickable-row" onclick="openViewerProfile(${c.id})">
-      <div class="result-name">${c.name}</div>
+      <div class="result-name">${esc(c.name)}</div>
       <div class="result-actions"><span class="nav-cell">عرض ›</span></div>
     </div>`).join("");
 }
@@ -799,8 +808,8 @@ function viewerBillRows(custId) {
     <tr>
       <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDate(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
-      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
+      <td>${b.items.map((it) => `${esc(it.description)} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => it.size ? esc(it.size) : "—").join("<br>")}</td>
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
@@ -814,8 +823,8 @@ function viewerPayRows(custId) {
   return payments.map((p) => {
     const isRet = kindOf(p) === "return";
     const desc = (isRet && p.items && p.items.length)
-      ? p.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
-      : (p.note || "—");
+      ? p.items.map((it) => `${esc(it.description)}${it.size ? " (" + esc(it.size) + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
+      : (p.note ? esc(p.note) : "—");
     return `
     <tr>
       <td class="num">${docCell(p.docNo)}</td>
@@ -871,9 +880,9 @@ function renderViewerProfile(custId) {
   const bills = billsOf(custId);
   $("#viewer-profile-content").innerHTML = `
     <div class="profile-header">
-      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div class="profile-avatar">${esc(c.name.trim().charAt(0))}</div>
       <div>
-        <h2 class="profile-name">${c.name}</h2>
+        <h2 class="profile-name">${esc(c.name)}</h2>
         <div class="profile-meta">${statusBadge}</div>
       </div>
     </div>
@@ -936,7 +945,7 @@ function doBillsViewSearch() {
   if (!matches.length) { box.innerHTML = '<p class="empty-msg">لا يوجد عميل بهذا الاسم.</p>'; return; }
   box.innerHTML = matches.map((c) => `
     <div class="result-card clickable-row" onclick="openBillsViewProfile(${c.id})">
-      <div class="result-name">${c.name}</div>
+      <div class="result-name">${esc(c.name)}</div>
       <div class="result-actions"><span class="nav-cell">عرض ›</span></div>
     </div>`).join("");
 }
@@ -953,8 +962,8 @@ function billsViewRows(custId) {
     <tr>
       <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDate(b.date)}</td>
-      <td>${b.items.map((it) => it.description || "—").join("<br>")}</td>
-      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
+      <td>${b.items.map((it) => it.description ? esc(it.description) : "—").join("<br>")}</td>
+      <td>${b.items.map((it) => it.size ? esc(it.size) : "—").join("<br>")}</td>
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
     </tr>`).join("");
 }
@@ -976,9 +985,9 @@ function renderBillsViewProfile(custId) {
   if (!c) return;
   $("#bv-profile-content").innerHTML = `
     <div class="profile-header">
-      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div class="profile-avatar">${esc(c.name.trim().charAt(0))}</div>
       <div>
-        <h2 class="profile-name">${c.name}</h2>
+        <h2 class="profile-name">${esc(c.name)}</h2>
         <div class="profile-meta">الفواتير</div>
       </div>
     </div>
@@ -1024,8 +1033,8 @@ function stopRequestPolling() {
 function renderRequestsTab() {
   const rows = pendingRequests.length ? pendingRequests.map((r) => `
     <tr>
-      <td>${r.username || "—"}</td>
-      <td>${r.device || "—"}</td>
+      <td>${esc(r.username) || "—"}</td>
+      <td>${esc(r.device) || "—"}</td>
       <td>${r.created_at ? fmtDateTime(r.created_at) : "—"}</td>
       <td class="row-actions">
         <button class="btn btn-success btn-sm" onclick="decideRequest(${r.id}, true)">موافقة</button>
@@ -1077,7 +1086,7 @@ function doEmployeeSearch() {
   }
   box.innerHTML = matches.map((c) => `
     <div class="result-card">
-      <div class="result-name">${c.name}</div>
+      <div class="result-name">${esc(c.name)}</div>
       <div class="result-actions">
         <button class="btn btn-primary" onclick="openBillForm(${c.id})">إضافة فاتورة</button>
         <button class="btn btn-success" onclick="openPaymentForm(${c.id})">إضافة دفعة</button>
@@ -1116,7 +1125,7 @@ function openBillForm(custId, editId, mode) {
     ${dateFieldHTML(editing, rec)}
     <div class="field">
       <label>رقم ال${word} / الكشف (إلزامي)</label>
-      <input type="text" id="bill-docno" placeholder="مثال: 42690" value="${editing ? (rec.docNo || "") : ""}" required />
+      <input type="text" id="bill-docno" placeholder="مثال: 42690" value="${editing ? esc(rec.docNo || "") : ""}" required />
     </div>
     <div class="table-wrap">
       <table class="bill-items">
@@ -1157,7 +1166,7 @@ function addBillRow(item) {
   // المدير يستطيع إدخال سعر بالسالب (فاتورة تُنقص الرصيد / رصيد بالسالب)
   const priceMin = (currentUser && currentUser.role === "manager") ? "" : ' min="0"';
   tr.innerHTML = `
-    <td><input type="text" class="it-desc" placeholder="وصف الصنف" value="${String(desc).replace(/"/g, "&quot;")}" /></td>
+    <td><input type="text" class="it-desc" placeholder="وصف الصنف" value="${esc(desc)}" /></td>
     <td><input type="text" class="it-size" placeholder="المقاس" value="${String(size).replace(/"/g, "&quot;")}" /></td>
     <td><input type="number" class="it-count" min="0" value="${count}" oninput="recalcBill()" /></td>
     <td><input type="number" class="it-price"${priceMin} value="${price}" oninput="recalcBill()" /></td>
@@ -1268,11 +1277,11 @@ function openPaymentForm(custId, editId, kind) {
     </div>
     <div class="field">
       <label>رقم ال${def.docWord || def.word} (${def.docReq ? "إلزامي" : "اختياري"})</label>
-      <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? (pay.docNo || "") : ""}" />
+      <input type="text" id="pay-docno" placeholder="مثال: 387" value="${editing ? esc(pay.docNo || "") : ""}" />
     </div>
     <div class="field">
       <label>ملاحظة</label>
-      <textarea id="pay-note" placeholder="ملاحظة اختيارية...">${editing ? (pay.note || "") : ""}</textarea>
+      <textarea id="pay-note" placeholder="ملاحظة اختيارية...">${editing ? esc(pay.note || "") : ""}</textarea>
     </div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="savePayment(${custId}, ${editing ? editId : "null"}, '${k}')">${editing ? "حفظ التعديلات" : ("حفظ ال" + def.word)}</button>
@@ -1360,7 +1369,7 @@ function renderManager() {
 
 /* ---------- الفواتير الملغية (سجلّ منفصل لا يؤثر على أي رقم) ---------- */
 function cancelledItemsCell(c) {
-  return (c.items || []).map((it) => `${it.description} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>") || "—";
+  return (c.items || []).map((it) => `${esc(it.description)} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>") || "—";
 }
 function renderCancelledTab() {
   const list = (DB.cancelled || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1368,11 +1377,11 @@ function renderCancelledTab() {
     <tr>
       <td class="num">${docCell(c.docNo)}</td>
       <td>${fmtDate(c.date)}</td>
-      <td>${c.customerName || "—"}</td>
+      <td>${esc(c.customerName) || "—"}</td>
       <td>${cancelledItemsCell(c)}</td>
-      <td>${(c.items || []).map((it) => it.size || "—").join("<br>") || "—"}</td>
+      <td>${(c.items || []).map((it) => it.size ? esc(it.size) : "—").join("<br>") || "—"}</td>
       <td class="num">${fmtMoney(c.total)}</td>
-      <td>${c.reason || "—"}</td>
+      <td>${esc(c.reason) || "—"}</td>
       ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="openCancelledForm(${c.id})">تعديل</button>
         <button class="btn btn-danger btn-sm" onclick="deleteCancelled(${c.id})">حذف</button>
@@ -1396,8 +1405,8 @@ function openCancelledForm(editId) {
   const dateVal = editing ? cairoDayKey(rec.date) : cairoDayKey(new Date().toISOString());
   openModal(editing ? "تعديل فاتورة ملغية" : "فاتورة ملغية جديدة", `
     <div class="field"><label>التاريخ</label><input type="date" id="rec-date" value="${dateVal}" /></div>
-    <div class="field"><label>رقم الفاتورة (إلزامي)</label><input type="text" id="canc-docno" placeholder="مثال: 42690" value="${editing ? (rec.docNo || "") : ""}" /></div>
-    <div class="field"><label>اسم العميل (اختياري)</label><input type="text" id="canc-cust" placeholder="اسم العميل" value="${editing ? (rec.customerName || "").replace(/"/g, "&quot;") : ""}" /></div>
+    <div class="field"><label>رقم الفاتورة (إلزامي)</label><input type="text" id="canc-docno" placeholder="مثال: 42690" value="${editing ? esc(rec.docNo || "") : ""}" /></div>
+    <div class="field"><label>اسم العميل (اختياري)</label><input type="text" id="canc-cust" placeholder="اسم العميل" value="${editing ? esc(rec.customerName || "") : ""}" /></div>
     <div class="table-wrap">
       <table class="bill-items">
         <thead><tr><th style="width:32%">وصف الصنف</th><th style="width:14%">المقاس</th><th style="width:13%">العدد</th><th style="width:18%">السعر</th><th style="width:19%">الإجمالي</th><th style="width:4%"></th></tr></thead>
@@ -1406,7 +1415,7 @@ function openCancelledForm(editId) {
     </div>
     <button type="button" class="btn btn-outline btn-sm" onclick="addBillRow()">+ إضافة صف</button>
     <div class="bill-total-row"><span>المجموع الكلي</span><span class="num" id="bill-grand-total">0 ج.م</span></div>
-    <div class="field"><label>سبب الإلغاء (اختياري)</label><textarea id="canc-reason" placeholder="سبب إلغاء الفاتورة...">${editing ? (rec.reason || "") : ""}</textarea></div>
+    <div class="field"><label>سبب الإلغاء (اختياري)</label><textarea id="canc-reason" placeholder="سبب إلغاء الفاتورة...">${editing ? esc(rec.reason || "") : ""}</textarea></div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="saveCancelled(${editing ? editId : "null"})">${editing ? "حفظ التعديلات" : "حفظ"}</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
@@ -1467,8 +1476,8 @@ function renderUsersTab() {
   const rows = activeSessions.length ? activeSessions.map((s) => {
     const me = currentUser && s.userId === currentUser.userId;
     return `<tr>
-      <td>${s.username || "—"}${me ? ' <span class="badge badge-success">أنت</span>' : ""}</td>
-      <td>${s.device || "—"}</td>
+      <td>${esc(s.username) || "—"}${me ? ' <span class="badge badge-success">أنت</span>' : ""}</td>
+      <td>${esc(s.device) || "—"}</td>
       <td>${s.last_seen ? fmtDateTime(s.last_seen) : "—"}</td>
       <td class="row-actions">${me ? "—" : `<button class="btn btn-danger btn-sm" onclick="logoutUser(${s.id})">تسجيل الخروج</button>`}</td>
     </tr>`;
@@ -1507,11 +1516,11 @@ function renderRejectedTab() {
   const rows = managerRejected.length ? managerRejected.map((e) => `
     <tr class="clickable-row" onclick="showRejectedDetails(${e.id})">
       <td>${entryKindBadge(e.kind)}</td>
-      <td>${e.customerName || "—"}</td>
+      <td>${esc(e.customerName) || "—"}</td>
       <td>${entryDetail(e)}</td>
       <td class="num">${fmtMoney(entryAmount(e))}</td>
-      <td>${e.createdBy || "—"}</td>
-      <td>${e.rejectReason ? e.rejectReason : "—"}</td>
+      <td>${esc(e.createdBy) || "—"}</td>
+      <td>${e.rejectReason ? esc(e.rejectReason) : "—"}</td>
       <td>${e.decided_at ? fmtDateTime(e.decided_at) : "—"}</td>
       ${canEdit() ? `<td class="row-actions"><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); mgrDeleteRejected(${e.id})">حذف</button></td>` : ""}
     </tr>`).join("") : `<tr><td colspan="${canEdit() ? 8 : 7}" class="empty-msg">لا توجد إدخالات مرفوضة.</td></tr>`;
@@ -1564,10 +1573,10 @@ function allBillsRows() {
     const cust = customerById(b.customerId);
     return `
       <tr class="clickable-row" onclick="openClientProfile(${b.customerId})">
-        <td class="num">${b.docNo ? b.docNo : ("#" + b.id)}</td>
+        <td class="num">${b.docNo ? esc(b.docNo) : ("#" + b.id)}</td>
         <td>${fmtDate(b.date)}</td>
-        <td>${cust ? cust.name : "—"}</td>
-        <td>${b.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+        <td>${cust ? esc(cust.name) : "—"}</td>
+        <td>${b.items.map((it) => `${esc(it.description)}${it.size ? " (" + esc(it.size) + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
         <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
         <td class="num">${fmtMoney(b.total)}</td>
       </tr>`;
@@ -1613,7 +1622,7 @@ function clientsRows() {
     const label = bal > 0 ? "مستحق" : "مسدد";
     return `
       <tr class="clickable-row" onclick="openClientProfile(${c.id})">
-        <td>${c.name}</td>
+        <td>${esc(c.name)}</td>
         <td class="num">${fmtMoney(totalBills(c.id))}</td>
         <td class="num">${fmtMoney(totalPayments(c.id))}</td>
         <td class="num">${fmtMoney(bal)}</td>
@@ -1675,7 +1684,7 @@ function renderClientsTab() {
 }
 
 /* ---------- تبويب الحركة اليومية (مجمّعة بالأيام) ---------- */
-function actItemsSummary(items) { return (items || []).map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>"); }
+function actItemsSummary(items) { return (items || []).map((it) => `${esc(it.description)}${it.size ? " (" + esc(it.size) + ")" : ""} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>"); }
 /* العميل «نقدي» ليس عميلاً حقيقياً بل مخزن المبيعات النقدية */
 function cashCustomerId() {
   const c = DB.customers.find((x) => normSearch(x.name) === "نقدي");
@@ -1809,7 +1818,7 @@ function openActivityDay(key) {
     const k = kindOf(p);
     if (k === "discount" || k === "return" || k === "transfer" || k === "payment") {
       const c = customerById(p.customerId);
-      const detail = (k === "return" && p.items && p.items.length) ? actItemsSummary(p.items) : (p.note || "—");
+      const detail = (k === "return" && p.items && p.items.length) ? actItemsSummary(p.items) : (p.note ? esc(p.note) : "—");
       items.push({ date: p.date, type: k, customerName: c ? c.name : "—", docNo: p.docNo, detail, value: p.amount });
     }
   });
@@ -1817,7 +1826,7 @@ function openActivityDay(key) {
   const rows = items.length ? items.map((i) => `
     <tr>
       <td>${dayBadge(i.type)}</td>
-      <td>${i.customerName || "—"}</td>
+      <td>${esc(i.customerName) || "—"}</td>
       <td class="num">${docCell(i.docNo)}</td>
       <td>${i.detail || "—"}</td>
       <td class="num">${fmtMoney(i.value)}</td>
@@ -1874,9 +1883,9 @@ function renderDailyTab() {
     <tr>
       <td class="num">${docCell(c.docNo)}</td>
       <td>${fmtDate(c.date)}</td>
-      <td>${c.customerName || "—"}</td>
+      <td>${esc(c.customerName) || "—"}</td>
       <td class="num">${fmtMoney(c.total)}</td>
-      <td>${c.reason || "—"}</td>
+      <td>${esc(c.reason) || "—"}</td>
     </tr>`).join("") : '<tr><td colspan="5" class="empty-msg">لا توجد فواتير ملغية في هذه الفترة.</td></tr>';
 
   $("#tab-daily").innerHTML = `
@@ -2023,7 +2032,7 @@ function statementRows() {
     const bal = balanceOf(c.id);
     return `
       <tr class="clickable-row" onclick="openClientProfile(${c.id})">
-        <td>${c.name}</td>
+        <td>${esc(c.name)}</td>
         <td class="num">${billsOf(c.id).length}</td>
         <td class="num">${fmtMoney(totalBills(c.id))}</td>
         <td class="num">${paymentsOf(c.id).length}</td>
@@ -2102,7 +2111,7 @@ function renderCreditTab() {
   const rows = credit.length
     ? credit.map(({ c, bal }) => `
       <tr class="clickable-row" onclick="openClientProfile(${c.id})">
-        <td>${c.name}</td>
+        <td>${esc(c.name)}</td>
         <td class="num">${fmtMoney(totalBills(c.id))}</td>
         <td class="num">${fmtMoney(totalPayments(c.id))}</td>
         <td class="num"><b>${fmtMoney(-bal)}</b></td>
@@ -2218,7 +2227,7 @@ function subpageHTML(custId, type) {
 
 function subpageHeader(custId, title) {
   const c = customerById(custId);
-  return `<h2 class="page-title subpage-title">${title} — <span class="subpage-client">${c.name}</span></h2>`;
+  return `<h2 class="page-title subpage-title">${title} — <span class="subpage-client">${esc(c.name)}</span></h2>`;
 }
 
 /* --- صفحة الفواتير (مع تعديل/حذف) --- */
@@ -2233,8 +2242,8 @@ function billsPageRows(custId) {
       <td>#${b.id}</td>
       <td class="num">${docCell(b.docNo)}</td>
       <td>${fmtDateTime(b.date)}</td>
-      <td>${b.items.map((it) => `${it.description} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
-      <td>${b.items.map((it) => it.size || "—").join("<br>")}</td>
+      <td>${b.items.map((it) => `${esc(it.description)} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")}</td>
+      <td>${b.items.map((it) => it.size ? esc(it.size) : "—").join("<br>")}</td>
       <td class="num">${b.items.map((it) => fmtMoney(it.price)).join("<br>")}</td>
       <td class="num">${b.items.reduce((x, it) => x + it.count, 0).toLocaleString("ar-EG")}</td>
       <td class="num">${fmtMoney(b.total)}</td>
@@ -2258,7 +2267,7 @@ function renderBillsPage(custId) {
       ${canEdit() ? `<button class="btn btn-primary btn-sm" onclick="openBillForm(${custId})">+ إضافة فاتورة</button>` : ""}
     </div>
     <div class="search-bar">
-      <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${billsSearchQuery.replace(/"/g, "&quot;")}" oninput="billsSearchInput(${custId}, this.value)" />
+      <input type="text" placeholder="ابحث برقم الفاتورة أو المقاس أو اسم الصنف..." value="${esc(billsSearchQuery)}" oninput="billsSearchInput(${custId}, this.value)" />
     </div>
     <div class="table-wrap">
       <table class="data zebra">
@@ -2275,8 +2284,8 @@ function renderPaymentsPage(custId) {
     const isRet = kindOf(p) === "return";
     const editCall = isRet ? `openReturnForm(${custId}, ${p.id})` : `openPaymentForm(${custId}, ${p.id})`;
     const desc = (isRet && p.items && p.items.length)
-      ? p.items.map((it) => `${it.description}${it.size ? " (" + it.size + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
-      : (p.note || "—");
+      ? p.items.map((it) => `${esc(it.description)}${it.size ? " (" + esc(it.size) + ")" : ""} × ${it.count.toLocaleString("ar-EG")}`).join("<br>")
+      : (p.note ? esc(p.note) : "—");
     return `
     <tr>
       <td>#${p.id}</td>
@@ -2330,7 +2339,7 @@ function renderStatementPage(custId) {
         <td>${fmtDate(e.date)}</td>
         <td class="num">${docCell(e.docNo)}</td>
         <td>${typeBadge}</td>
-        <td>${e.desc}</td>
+        <td>${esc(e.desc)}</td>
         <td class="num">${e.debit ? fmtMoney(e.debit) : "—"}</td>
         <td class="num">${e.credit ? fmtMoney(e.credit) : "—"}</td>
         <td class="num">${fmtMoney(running)}</td>
@@ -2360,7 +2369,7 @@ function renderAnalyticsPage(custId) {
   }));
   const items = Object.keys(itemMap).map((k) => ({ name: k, ...itemMap[k] })).sort((a, b) => b.value - a.value);
   const itemsHtml = items.length ? items.map((it) => `
-    <tr><td>${it.name}</td><td class="num">${it.count.toLocaleString("ar-EG")}</td><td class="num">${fmtMoney(it.value)}</td></tr>`).join("") :
+    <tr><td>${esc(it.name)}</td><td class="num">${it.count.toLocaleString("ar-EG")}</td><td class="num">${fmtMoney(it.value)}</td></tr>`).join("") :
     '<tr><td colspan="3" class="empty-msg">لا توجد أصناف.</td></tr>';
 
   const mMap = {};
@@ -2426,9 +2435,9 @@ function renderClientProfile(custId) {
 
   return `
     <div class="profile-header">
-      <div class="profile-avatar">${c.name.trim().charAt(0)}</div>
+      <div class="profile-avatar">${esc(c.name.trim().charAt(0))}</div>
       <div>
-        <h2 class="profile-name">${c.name}</h2>
+        <h2 class="profile-name">${esc(c.name)}</h2>
         <div class="profile-meta">رقم العميل: ${c.id.toLocaleString("ar-EG")} &nbsp;•&nbsp; ${statusBadge}</div>
       </div>
       ${canEdit() ? `<button class="btn btn-outline btn-sm" style="margin-inline-start:auto" onclick="editCustomerForm(${c.id})">✎ تعديل الاسم</button>` : ""}
