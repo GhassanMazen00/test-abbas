@@ -26,14 +26,15 @@ const Store = (function () {
     ready: !hasKeys || useSupabase, // إن كانت المفاتيح مضبوطة لكن المكتبة لم تُحمّل → غير جاهز
 
     /* ---------- المصادقة ---------- */
-    async signIn(username, password) {
+    async signIn(username, password, captchaToken) {
       if (!useSupabase) {
         const acc = USERS[username];
         if (!acc || acc.password !== password) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
         return { username, role: acc.role, userId: username };
       }
       const email = username.includes("@") ? username : username + "@" + domain;
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      const opts = captchaToken ? { captchaToken } : undefined;
+      const { data, error } = await sb.auth.signInWithPassword({ email, password, options: opts });
       if (error) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
       const { data: prof } = await sb.from("profiles").select("username, role").eq("id", data.user.id).single();
       return { username: (prof && prof.username) || username, role: (prof && prof.role) || "employee", userId: data.user.id };
