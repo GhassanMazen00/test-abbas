@@ -561,6 +561,9 @@ function startApp() {
 
   if (isManagerView()) {
     document.querySelector('.tab[data-tab="requests"]').classList.remove("hidden");
+    // تبويب «جميع الدفعات والحركات» للمدير (loai) فقط — مخفي عن المشرف
+    const allpaysTab = document.querySelector('.tab[data-tab="allpays"]');
+    if (allpaysTab) allpaysTab.classList.toggle("hidden", currentUser.role !== "manager");
     document.body.classList.toggle("readonly-view", !canEdit());
     showOnlyView("manager-view");
     renderManager();
@@ -1386,6 +1389,7 @@ $$("#manager-view .tab").forEach((tab) => {
     if (tab.dataset.tab === "users") { renderUsersTab(); refreshUsers(); }
     if (tab.dataset.tab === "cancelled") renderCancelledTab();
     if (tab.dataset.tab === "activity") renderActivityTab();
+    if (tab.dataset.tab === "allpays") renderAllPaysTab();
   });
 });
 
@@ -1396,6 +1400,7 @@ function renderManager() {
   renderMonthlyTab();
   renderStatementTab();
   renderAllBillsTab();
+  renderAllPaysTab();
   renderCreditTab();
   renderCancelledTab();
   renderRejectedTab();
@@ -1641,6 +1646,83 @@ function renderAllBillsTab() {
     allBillsQuery = inp.value;
     $("#allbills-body").innerHTML = allBillsRows();
   };
+}
+
+/* ---------- تبويب: جميع الدفعات والحركات (للمدير loai فقط) ----------
+   عرض مستقل لكل الدفعات والحركات (دفعة/ترحيل/خصم/مرتجع) عدا الفواتير.
+   البحث برقم الحركة أو الملاحظة، مع فلتر تاريخ اختياري. لا يؤثّر على أي رقم آخر. */
+let allPaysQuery = "", allPaysFrom = "", allPaysTo = "";
+function allPaysInRange(dateISO) {
+  if (!allPaysFrom && !allPaysTo) return true;
+  const k = cairoDayKey(dateISO);
+  return (!allPaysFrom || k >= allPaysFrom) && (!allPaysTo || k <= allPaysTo);
+}
+function allPaysMatch(p, q, nq) {
+  if (!q) return true;
+  const doc = String(p.docNo || "");
+  const note = String(p.note || "");
+  return doc.includes(q) || note.includes(q) || normSearch(note).includes(nq);
+}
+function allPaysList() {
+  const q = allPaysQuery.trim(), nq = normSearch(q);
+  return DB.payments
+    .filter((p) => allPaysInRange(p.date) && allPaysMatch(p, q, nq))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function allPaysRows() {
+  const rows = allPaysList();
+  if (!rows.length) return '<tr><td colspan="6" class="empty-msg">لا توجد حركات مطابقة.</td></tr>';
+  return rows.map((p) => {
+    const c = customerById(p.customerId);
+    const isRet = kindOf(p) === "return";
+    const detail = (isRet && p.items && p.items.length)
+      ? p.items.map((it) => `${esc(it.description)}${it.size ? " (" + esc(it.size) + ")" : ""} × ${(Number(it.count) || 0).toLocaleString("ar-EG")}`).join("<br>")
+      : (p.note ? esc(p.note) : "—");
+    return `
+      <tr class="clickable-row" onclick="openClientProfile(${p.customerId})">
+        <td class="num">${docCell(p.docNo)}</td>
+        <td>${fmtDate(p.date)}</td>
+        <td>${c ? esc(c.name) : "—"}</td>
+        <td>${kindBadge(kindOf(p))}</td>
+        <td>${detail}</td>
+        <td class="num">${fmtMoney(p.amount)}</td>
+      </tr>`;
+  }).join("");
+}
+function renderAllPaysTab() {
+  if (!isManagerView()) return;
+  const q = allPaysQuery.trim();
+  const filtered = q || allPaysFrom || allPaysTo;
+  const shown = allPaysList().length;
+  $("#tab-allpays").innerHTML = `
+    <div class="search-bar">
+      <input type="text" id="allpays-search" placeholder="ابحث برقم الحركة أو الملاحظة..." value="${esc(allPaysQuery)}" />
+    </div>
+    <div class="filter-bar">
+      <label>من تاريخ <input type="date" id="allpays-from" value="${esc(allPaysFrom)}" onchange="allPaysDateChanged()" /></label>
+      <label>إلى تاريخ <input type="date" id="allpays-to" value="${esc(allPaysTo)}" onchange="allPaysDateChanged()" /></label>
+      <button class="btn btn-outline btn-sm" onclick="clearAllPaysDate()">مسح التاريخ</button>
+    </div>
+    <p class="info-line">جميع الدفعات والحركات عدا الفواتير (<b>${DB.payments.length.toLocaleString("ar-EG")}</b> حركة)${filtered ? ` — <b>${shown.toLocaleString("ar-EG")}</b> نتيجة` : ""}. عرض مستقل لا يؤثّر على أي أرقام في التبويبات الأخرى. اضغط على الحركة لفتح ملف العميل.</p>
+    <div class="table-wrap">
+      <table class="data zebra">
+        <thead><tr><th>رقم الحركة</th><th>التاريخ</th><th>العميل</th><th>النوع</th><th>التفاصيل / الملاحظة</th><th>المبلغ</th></tr></thead>
+        <tbody id="allpays-body">${allPaysRows()}</tbody>
+      </table>
+    </div>`;
+  const inp = $("#allpays-search");
+  if (inp) inp.oninput = () => { allPaysQuery = inp.value; $("#allpays-body").innerHTML = allPaysRows(); };
+}
+function allPaysDateChanged() {
+  const f = $("#allpays-from"), t = $("#allpays-to");
+  if (f) allPaysFrom = f.value;
+  if (t) allPaysTo = t.value;
+  const b = $("#allpays-body"); if (b) b.innerHTML = allPaysRows();
+}
+function clearAllPaysDate() {
+  allPaysFrom = ""; allPaysTo = "";
+  const f = $("#allpays-from"), t = $("#allpays-to"); if (f) f.value = ""; if (t) t.value = "";
+  const b = $("#allpays-body"); if (b) b.innerHTML = allPaysRows();
 }
 
 /* ---------- تبويب العملاء ---------- */
