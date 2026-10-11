@@ -13,20 +13,23 @@ const REVIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.REVIEWER_USERN
 const VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.VIEWER_USERNAME) || "worker3";
 const SUPERVISOR_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.SUPERVISOR_USERNAME) || "odai";
 const BILLS_VIEWER_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.BILLS_VIEWER_USERNAME) || "worker4";
+const STORAGE_USERNAME = (window.APP_CONFIG && window.APP_CONFIG.STORAGE_USERNAME) || "storage1";
 function isReviewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === REVIEWER_USERNAME; }
 function isViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === VIEWER_USERNAME; }
 /* عرض الفواتير فقط (worker4): بحث عميل ثم فواتيره بأعمدة محدودة */
 function isBillsViewer(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === BILLS_VIEWER_USERNAME; }
+/* موظف المخزن (storage1): واجهة مستقلة لإدارة أصناف المخزن */
+function isStorageUser(u) { u = u || currentUser; return !!u && u.role !== "manager" && u.username === STORAGE_USERNAME; }
 /* المشرف: يرى واجهة المدير كاملة لكن للقراءة فقط (يُحدَّد بالدور supervisor أو باسم المستخدم) */
 function isSupervisor(u) { u = u || currentUser; return !!u && u.role !== "manager" && (u.role === "supervisor" || u.username === SUPERVISOR_USERNAME); }
 /* هل يرى المستخدم لوحة المدير؟ (المدير أو المشرف) */
 function isManagerView(u) { u = u || currentUser; return !!u && (u.role === "manager" || isSupervisor(u)); }
 /* هل يملك صلاحية التعديل/الإضافة/الحذف على البيانات؟ (المدير فقط) */
 function canEdit(u) { u = u || currentUser; return !!u && u.role === "manager"; }
-/* من يدخل مباشرةً دون انتظار موافقة (المدير، المشرف، وعارض الفواتير worker4) */
+/* من يدخل مباشرةً دون انتظار موافقة (المدير، المشرف، عارض الفواتير worker4، وموظف المخزن) */
 /* بعد الساعة 6 مساءً (توقيت مصر) يحتاج عارض الفواتير أيضاً موافقة للدخول */
-function skipsLoginApproval(u) { u = u || currentUser; return isManagerView(u) || (isBillsViewer(u) && cairoHour() < 18); }
-function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && u.username !== BILLS_VIEWER_USERNAME && !isSupervisor(u); }
+function skipsLoginApproval(u) { u = u || currentUser; return isManagerView(u) || isStorageUser(u) || (isBillsViewer(u) && cairoHour() < 18); }
+function isMaker(u) { u = u || currentUser; return !!u && u.role === "employee" && u.username !== REVIEWER_USERNAME && u.username !== VIEWER_USERNAME && u.username !== SUPERVISOR_USERNAME && u.username !== BILLS_VIEWER_USERNAME && u.username !== STORAGE_USERNAME && !isSupervisor(u); }
 
 /* ---------- أدوات مساعدة ---------- */
 const $ = (sel) => document.querySelector(sel);
@@ -219,7 +222,7 @@ function openMonthBills(key) {
 
 /* إظهار واجهة واحدة فقط من واجهات التطبيق */
 function showOnlyView(viewId) {
-  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view", "viewer-view", "billsview-view"].forEach((v) => {
+  ["employee-view", "manager-view", "client-view", "subpage-view", "review-view", "viewer-view", "billsview-view", "storage-view"].forEach((v) => {
     const el = document.getElementById(v);
     if (el) el.classList.toggle("hidden", v !== viewId);
   });
@@ -556,7 +559,7 @@ function startApp() {
   $("#login-screen").classList.add("hidden");
   $("#waiting-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  const roleLabel = currentUser.role === "manager" ? "المدير" : (isSupervisor() ? "مشرف" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : (isBillsViewer() ? "عرض الفواتير" : "الموظف"))));
+  const roleLabel = currentUser.role === "manager" ? "المدير" : (isSupervisor() ? "مشرف" : (isReviewer() ? "المراجِع" : (isViewer() ? "مطّلِع" : (isBillsViewer() ? "عرض الفواتير" : (isStorageUser() ? "المخزن" : "الموظف")))));
   $("#current-user").textContent = roleLabel + ": " + currentUser.username;
 
   if (isManagerView()) {
@@ -564,6 +567,9 @@ function startApp() {
     // تبويب «جميع الدفعات والحركات» للمدير (loai) فقط — مخفي عن المشرف
     const allpaysTab = document.querySelector('.tab[data-tab="allpays"]');
     if (allpaysTab) allpaysTab.classList.toggle("hidden", currentUser.role !== "manager");
+    // تبويب «المخزن» للمدير والمشرف
+    const storageTab = document.querySelector('.tab[data-tab="storage"]');
+    if (storageTab) storageTab.classList.remove("hidden");
     document.body.classList.toggle("readonly-view", !canEdit());
     showOnlyView("manager-view");
     renderManager();
@@ -572,6 +578,9 @@ function startApp() {
     showOnlyView("review-view");
     renderReview();
     startReviewPolling();
+  } else if (isStorageUser()) {
+    showOnlyView("storage-view");
+    storageOpenHome("#storage-content");
   } else if (isViewer()) {
     showOnlyView("viewer-view");
     viewerBackToSearch();
@@ -1390,6 +1399,7 @@ $$("#manager-view .tab").forEach((tab) => {
     if (tab.dataset.tab === "cancelled") renderCancelledTab();
     if (tab.dataset.tab === "activity") renderActivityTab();
     if (tab.dataset.tab === "allpays") renderAllPaysTab();
+    if (tab.dataset.tab === "storage") storageOpenHome("#tab-storage");
   });
 });
 
@@ -1725,9 +1735,207 @@ function clearAllPaysDate() {
   const b = $("#allpays-body"); if (b) b.innerHTML = allPaysRows();
 }
 
+/* =========================================================
+   المخزن (storage1 + المدير + المشرف) — وحدة مستقلة لا تؤثّر على أي حسابات
+   التصنيفات والمواصفات معرّفة هنا (schema) — نايلون وجرار يُكمَّلان لاحقاً.
+   ========================================================= */
+const STORAGE_CATS = ["عضم", "نايلون", "جرار"];
+const STORAGE_SCHEMA = {
+  "عضم": {
+    subs: ["3mm", "5mm", "8mm"],
+    specs: [
+      { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
+      { key: "color", label: "اللون", type: "text" },
+      { key: "size", label: "المقاس", type: "text" },
+      { key: "jarrarShape", label: "شكل الجرار", type: "text" }
+    ]
+  }
+  // "نايلون": {...}, "جرار": {...}  ← تُضاف بنفس الصيغة لاحقاً
+};
+let storageRoot = "#storage-content";
+let storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
+function canEditStorage(u) { u = u || currentUser; return !!u && (isStorageUser(u) || u.role === "manager"); }
+function storageItems() { return DB.storage || []; }
+function storageSpecsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].specs) || []; }
+function storageSubsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].subs) || []; }
+function storageItemText(it) {
+  return [it.category, it.sub, it.state, it.color, it.size, it.jarrarShape, it.note, fmtDate(it.date)].filter(Boolean).join(" ");
+}
+function storageMatch(it, q) {
+  const terms = normSearch(q).split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const hay = normSearch(storageItemText(it)) + " " + storageItemText(it);
+  return terms.every((t) => hay.includes(t));
+}
+function storageSpecCells(it) {
+  const parts = [];
+  if (it.state) parts.push(esc(it.state));
+  if (it.color) parts.push("اللون: " + esc(it.color));
+  if (it.size) parts.push("المقاس: " + esc(it.size));
+  if (it.jarrarShape) parts.push("شكل الجرار: " + esc(it.jarrarShape));
+  return parts.length ? parts.join(" • ") : "—";
+}
+function storageSearchRow(it) {
+  return `<tr>
+    <td>${esc(it.category)}</td>
+    <td class="num">${esc(it.sub) || "—"}</td>
+    <td>${storageSpecCells(it)}</td>
+    <td class="num">${Number(it.quantity).toLocaleString("ar-EG")}</td>
+    <td>${it.note ? esc(it.note) : "—"}</td>
+    <td>${fmtDate(it.date)}</td>
+  </tr>`;
+}
+function storageHomeResultsHtml() {
+  const q = storageHomeQuery.trim();
+  if (!q) return "";
+  const rows = storageItems().filter((it) => storageMatch(it, q)).sort((a, b) => new Date(b.date) - new Date(a.date));
+  return `<p class="info-line"><b>${rows.length.toLocaleString("ar-EG")}</b> نتيجة للبحث «${esc(q)}».</p>
+    <div class="table-wrap"><table class="data zebra">
+      <thead><tr><th>التصنيف</th><th>المقاس</th><th>المواصفات</th><th>الكمية</th><th>الملاحظة</th><th>التاريخ</th></tr></thead>
+      <tbody>${rows.length ? rows.map(storageSearchRow).join("") : '<tr><td colspan="6" class="empty-msg">لا نتائج مطابقة.</td></tr>'}</tbody>
+    </table></div>`;
+}
+function storageHomeHtml() {
+  const buttons = STORAGE_CATS.map((c) => {
+    const ready = !!STORAGE_SCHEMA[c];
+    const count = storageItems().filter((it) => it.category === c).length;
+    return `<button class="storage-cat-btn${ready ? "" : " soon"}" onclick="storageOpenCat('${c}')">
+      <span class="storage-cat-name">${esc(c)}</span>
+      <span class="storage-cat-sub">${ready ? count.toLocaleString("ar-EG") + " صنف" : "قريباً"}</span>
+    </button>`;
+  }).join("");
+  return `
+    <div class="section-head"><h2 class="page-title" style="margin:0">المخزن</h2></div>
+    <div class="search-bar"><input type="text" id="storage-home-search" placeholder="ابحث بكلمات مرنة: التصنيف، اللون، المقاس، الملاحظة، التاريخ..." value="${esc(storageHomeQuery)}" /></div>
+    <div id="storage-home-results">${storageHomeResultsHtml()}</div>
+    <div class="storage-cats">${buttons}</div>`;
+}
+function storageCatFilteredRows(cat) {
+  let rows = storageItems().filter((it) => it.category === cat);
+  if (storageSubFilter) rows = rows.filter((it) => it.sub === storageSubFilter);
+  const q = storageCatQuery.trim();
+  if (q) rows = rows.filter((it) => storageMatch(it, q));
+  return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function storageCatRow(it) {
+  return `<tr>
+    <td class="num">${esc(it.sub) || "—"}</td>
+    <td>${storageSpecCells(it)}</td>
+    <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b></td>
+    <td>${it.note ? esc(it.note) : "—"}</td>
+    <td>${fmtDate(it.date)}</td>
+    ${canEditStorage() ? `<td class="row-actions">
+      <button class="btn btn-success btn-sm" onclick="storageQtyForm(${it.id}, 'add')">+ كمية</button>
+      <button class="btn btn-warning btn-sm" onclick="storageQtyForm(${it.id}, 'withdraw')">− سحب</button>
+    </td>` : ""}
+  </tr>`;
+}
+function storageCatBodyHtml(cat) {
+  const rows = storageCatFilteredRows(cat);
+  return rows.length ? rows.map((it) => storageCatRow(it)).join("") : `<tr><td colspan="${canEditStorage() ? 6 : 5}" class="empty-msg">لا أصناف.</td></tr>`;
+}
+function storageCatInfoHtml(cat) {
+  const rows = storageCatFilteredRows(cat);
+  const totalQty = rows.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+  return `<b>${rows.length.toLocaleString("ar-EG")}</b> صنف — إجمالي الكمية <b>${totalQty.toLocaleString("ar-EG")}</b>${storageSubFilter ? ` (مقاس ${esc(storageSubFilter)})` : ""}.`;
+}
+function storageCategoryHtml(cat) {
+  const subs = storageSubsOf(cat);
+  const subBtns = [`<button class="chip${storageSubFilter === "" ? " active" : ""}" onclick="storageSetSub('')">الكل</button>`]
+    .concat(subs.map((s) => `<button class="chip${storageSubFilter === s ? " active" : ""}" onclick="storageSetSub('${s}')">${esc(s)}</button>`)).join("");
+  const addBtns = canEditStorage() ? subs.map((s) => `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '${s}')">+ ${esc(cat)} ${esc(s)}</button>`).join(" ") : "";
+  return `
+    <button class="btn btn-outline btn-back" onclick="storageOpenHome()">↩ العودة للمخزن</button>
+    <div class="section-head"><h2 class="page-title" style="margin:0">${esc(cat)}</h2></div>
+    ${addBtns ? `<div class="btn-group" style="margin-bottom:12px">${addBtns}</div>` : ""}
+    <div class="search-bar"><input type="text" id="storage-cat-search" placeholder="ابحث داخل ${esc(cat)} (لون، مقاس، ملاحظة...)" value="${esc(storageCatQuery)}" /></div>
+    <div class="chips-row">${subBtns}</div>
+    <p class="info-line" id="storage-cat-info">${storageCatInfoHtml(cat)}</p>
+    <div class="table-wrap"><table class="data zebra">
+      <thead><tr><th>المقاس (mm)</th><th>المواصفات</th><th>الكمية</th><th>الملاحظة</th><th>التاريخ</th>${canEditStorage() ? "<th>إجراءات</th>" : ""}</tr></thead>
+      <tbody id="storage-cat-body">${storageCatBodyHtml(cat)}</tbody>
+    </table></div>`;
+}
+function renderStorage() {
+  const el = document.querySelector(storageRoot);
+  if (!el) return;
+  el.innerHTML = storageCat ? storageCategoryHtml(storageCat) : storageHomeHtml();
+  const hs = el.querySelector("#storage-home-search");
+  if (hs) hs.oninput = () => { storageHomeQuery = hs.value; const r = el.querySelector("#storage-home-results"); if (r) r.innerHTML = storageHomeResultsHtml(); };
+  const cs = el.querySelector("#storage-cat-search");
+  if (cs) cs.oninput = () => {
+    storageCatQuery = cs.value;
+    const b = el.querySelector("#storage-cat-body"); if (b) b.innerHTML = storageCatBodyHtml(storageCat);
+    const info = el.querySelector("#storage-cat-info"); if (info) info.innerHTML = storageCatInfoHtml(storageCat);
+  };
+}
+function storageOpenHome(root) {
+  if (root) storageRoot = root;
+  storageCat = null; storageSubFilter = ""; storageHomeQuery = "";
+  renderStorage();
+}
+function storageOpenCat(cat) {
+  if (!STORAGE_SCHEMA[cat]) { toast("تصنيف «" + cat + "» قيد الإعداد — قريباً"); return; }
+  storageCat = cat; storageCatQuery = ""; storageSubFilter = "";
+  renderStorage();
+}
+function storageSetSub(sub) { storageSubFilter = sub; renderStorage(); }
+function storageAddForm(cat, sub) {
+  if (!canEditStorage()) return;
+  const fields = storageSpecsOf(cat).map((sp) => {
+    if (sp.type === "select") {
+      const opts = ['<option value="">—</option>'].concat(sp.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)).join("");
+      return `<div class="field"><label>${esc(sp.label)}</label><select id="st-${sp.key}">${opts}</select></div>`;
+    }
+    return `<div class="field"><label>${esc(sp.label)}</label><input type="text" id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
+  }).join("");
+  openModal(`${cat} ${sub} — صنف جديد`, `
+    <div class="form-grid">
+      ${fields}
+      <div class="field"><label>الكمية</label><input type="number" id="st-qty" min="0" placeholder="0" /></div>
+      <div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="storageSaveNew('${cat}', '${sub}')">حفظ الصنف</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+async function storageSaveNew(cat, sub) {
+  const obj = { category: cat, sub: sub, quantity: Number($("#st-qty") ? $("#st-qty").value : 0) || 0, note: ($("#st-note") ? $("#st-note").value : "").trim() };
+  storageSpecsOf(cat).forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
+  try {
+    await Store.addStorageItem(obj);
+    closeModal(); toast("تمت إضافة الصنف"); renderStorage();
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ الصنف"), true); }
+}
+function storageQtyForm(id, mode) {
+  if (!canEditStorage()) return;
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const isAdd = mode === "add";
+  openModal(`${isAdd ? "إضافة كمية" : "سحب كمية"} — ${it.category} ${it.sub}`, `
+    <p class="info-line">الكمية الحالية: <b>${Number(it.quantity).toLocaleString("ar-EG")}</b></p>
+    <div class="field"><label>${isAdd ? "الكمية المضافة" : "الكمية المسحوبة"}</label><input type="number" id="st-adj" min="1" placeholder="0" /></div>
+    <div class="modal-actions">
+      <button class="btn ${isAdd ? "btn-success" : "btn-warning"}" onclick="storageApplyQty(${id}, '${mode}')">${isAdd ? "إضافة" : "سحب"}</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+async function storageApplyQty(id, mode) {
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const amt = Math.abs(Number($("#st-adj") ? $("#st-adj").value : 0) || 0);
+  if (!amt) { toast("أدخل كمية صحيحة", true); return; }
+  const newQty = mode === "add" ? it.quantity + amt : it.quantity - amt;
+  if (newQty < 0) { toast("الكمية المسحوبة أكبر من المتوفّر (" + it.quantity.toLocaleString("ar-EG") + ")", true); return; }
+  try {
+    await Store.updateStorageItem(id, { quantity: newQty });
+    closeModal(); toast(mode === "add" ? "تمت إضافة الكمية" : "تم سحب الكمية"); renderStorage();
+  } catch (e) { toast(errMsg(e, "تعذّر تحديث الكمية"), true); }
+}
+
 /* ---------- تبويب العملاء ---------- */
-let clientsQuery = "";
-function clientsRows() {
+let clientsQuery = "";function clientsRows() {
   let custs = DB.customers;
   if (clientsQuery.trim()) {
     const set = new Set(matchCustomers(clientsQuery).map((c) => c.id));

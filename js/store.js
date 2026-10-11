@@ -19,6 +19,7 @@ const Store = (function () {
   const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0, docNo: r.doc_no || "" });
   const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment", items: r.items || [] });
   const mapCancelled = (r) => ({ id: r.id, docNo: r.doc_no || "", customerName: r.customer_name || "", items: r.items || [], total: Number(r.total) || 0, reason: r.reason || "", date: r.created_at });
+  const mapStorage = (r) => ({ id: r.id, category: r.category || "", sub: r.sub || "", state: r.state || "", color: r.color || "", size: r.size || "", jarrarShape: r.jarrar_shape || "", quantity: Number(r.quantity) || 0, note: r.note || "", date: r.created_at });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -85,6 +86,9 @@ const Store = (function () {
       // الفواتير الملغية (للمدير فقط) — منفصلة تماماً؛ آمنة إن لم يوجد الجدول
       DB.cancelled = [];
       try { DB.cancelled = (await this.fetchAllRows("cancelled_invoices")).map(mapCancelled); } catch (e) { DB.cancelled = []; }
+      // المخزن — منفصل تماماً؛ آمن إن لم يوجد الجدول أو لم يملك المستخدم صلاحية القراءة
+      DB.storage = [];
+      try { DB.storage = (await this.fetchAllRows("storage_items")).map(mapStorage); } catch (e) { DB.storage = []; }
     },
 
     /* ---------- العملاء ---------- */
@@ -193,6 +197,43 @@ const Store = (function () {
     async deleteCancelledInvoice(id) {
       if (useSupabase) { const { error } = await sb.from("cancelled_invoices").delete().eq("id", id); if (error) throw error; }
       DB.cancelled = DB.cancelled.filter((x) => x.id !== id);
+      if (!useSupabase) saveDB(DB);
+    },
+
+    /* ---------- المخزن (أصناف) — منفصل تماماً عن الحسابات ---------- */
+    async addStorageItem(it) {
+      const row = {
+        category: it.category || "", sub: it.sub || "", state: it.state || "",
+        color: it.color || "", size: it.size || "", jarrar_shape: it.jarrarShape || "",
+        quantity: Number(it.quantity) || 0, note: it.note || ""
+      };
+      if (!useSupabase) {
+        if (!DB.storage) DB.storage = [];
+        if (!DB.seq.storage) DB.seq.storage = 0;
+        DB.seq.storage++;
+        const rec = { id: DB.seq.storage, category: row.category, sub: row.sub, state: row.state, color: row.color, size: row.size, jarrarShape: row.jarrar_shape, quantity: row.quantity, note: row.note, date: new Date().toISOString() };
+        DB.storage.push(rec); saveDB(DB); return rec;
+      }
+      const { data, error } = await sb.from("storage_items").insert(row).select().single();
+      if (error) throw error;
+      const rec = mapStorage(data); if (!DB.storage) DB.storage = []; DB.storage.push(rec); return rec;
+    },
+    async updateStorageItem(id, patch) {
+      const row = {};
+      if (patch.quantity !== undefined) row.quantity = Number(patch.quantity) || 0;
+      if (patch.state !== undefined) row.state = patch.state;
+      if (patch.color !== undefined) row.color = patch.color;
+      if (patch.size !== undefined) row.size = patch.size;
+      if (patch.jarrarShape !== undefined) row.jarrar_shape = patch.jarrarShape;
+      if (patch.note !== undefined) row.note = patch.note;
+      if (useSupabase) { const { error } = await sb.from("storage_items").update(row).eq("id", id); if (error) throw error; }
+      const rec = (DB.storage || []).find((x) => x.id === id);
+      if (rec) { Object.keys(patch).forEach((k) => { if (patch[k] !== undefined) rec[k] = (k === "quantity" ? (Number(patch[k]) || 0) : patch[k]); }); }
+      if (!useSupabase) saveDB(DB);
+    },
+    async deleteStorageItem(id) {
+      if (useSupabase) { const { error } = await sb.from("storage_items").delete().eq("id", id); if (error) throw error; }
+      DB.storage = (DB.storage || []).filter((x) => x.id !== id);
       if (!useSupabase) saveDB(DB);
     },
 
