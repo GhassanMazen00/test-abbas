@@ -1740,18 +1740,32 @@ function clearAllPaysDate() {
    التصنيفات والمواصفات معرّفة هنا (schema) — نايلون وجرار يُكمَّلان لاحقاً.
    ========================================================= */
 const STORAGE_CATS = ["عضم", "نايلون", "جرار"];
+// الصفحة الرئيسية مجمّعة: كل مجموعة فيها أنواع أصناف مستقلة (رول/مسحورة تحت نفس المجموعة)
+const STORAGE_HOME_GROUPS = [
+  { name: "عضم", types: ["عضم", "رول عضم"] },
+  { name: "نايلون", types: ["نايلون", "رول نايلون", "مسحورة"] },
+  { name: "جرار", types: [] } // قريباً
+];
 const STORAGE_SCHEMA = {
   "عضم": {
     subs: ["3mm", "5mm", "8mm"],
     specs: [
       { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
       { key: "color", label: "اللون", type: "text" },
-      { key: "size", label: "المقاس", type: "text" },
+      { key: "colorNum", label: "رقم اللون", type: "number", opt: true },
+      { key: "size", label: "المقاس (سم)", type: "number", unit: "سم" },
       { key: "jarrarShape", label: "شكل الجرار", type: "text" }
     ]
   },
-  "نايلون": {
+  "رول عضم": {
     subs: ["3mm", "5mm", "8mm"],
+    specs: [
+      { key: "color", label: "اللون", type: "text" },
+      { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
+    ]
+  },
+  "نايلون": {
+    subs: ["3mm", "5mm", "7mm"],
     specs: [
       { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
       // يظهر فقط عند اختيار «مفتوح» — واجب الاختيار حينها
@@ -1760,13 +1774,27 @@ const STORAGE_SCHEMA = {
       { key: "size", label: "المقاس", type: "text" },
       { key: "jarrarShape", label: "شكل الجرار", type: "text" }
     ]
+  },
+  "رول نايلون": {
+    subs: ["3mm", "5mm", "7mm"],
+    specs: [
+      { key: "color", label: "اللون", type: "text" },
+      { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
+    ]
+  },
+  "مسحورة": {
+    subs: [],
+    specs: [
+      { key: "color", label: "اللون", type: "text" },
+      { key: "colorNum", label: "رقم اللون", type: "number", opt: true },
+      { key: "size", label: "المقاس", type: "text" }
+    ]
   }
-  // "جرار": {...}  ← يُضاف لاحقاً بنفس الصيغة
 };
 let storageRoot = "#storage-content";
 let storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
 let storageTab = "store"; // store | temps | history
-let storageHistFrom = "", storageHistTo = "", storageHistType = "";
+let storageHistFrom = "", storageHistTo = "", storageHistType = "", storageHistItem = "";
 const STORAGE_EVENT_LABELS = {
   item_added: "إضافة صنف",
   qty_added: "إضافة كمية",
@@ -1781,8 +1809,8 @@ const STORAGE_EVENT_BADGE = {
 };
 function storageEventBadge(type) { return `<span class="badge ${STORAGE_EVENT_BADGE[type] || ""}">${STORAGE_EVENT_LABELS[type] || esc(type)}</span>`; }
 /* تسجيل حدث في سجلّ المخزن (بتوقيت القاهرة عند العرض) */
-function logStore(itemId, cat, sub, type, amount, reason) {
-  return Store.logStorageEvent({ itemId: itemId, category: cat, sub: sub, type: type, amount: amount, reason: reason, actor: (currentUser ? currentUser.username : "") });
+function logStore(itemId, cat, sub, type, amount, reason, specs) {
+  return Store.logStorageEvent({ itemId: itemId, category: cat, sub: sub, type: type, amount: amount, reason: reason, specs: specs || "", actor: (currentUser ? currentUser.username : "") });
 }
 function canEditStorage(u) { u = u || currentUser; return !!u && (isStorageUser(u) || u.role === "manager"); }
 /* الحذف للمدير (loai) فقط — لا storage1 ولا المشرف */
@@ -1804,9 +1832,15 @@ function storageSpecCells(it) {
   const parts = [];
   storageSpecsOf(it.category).forEach((sp) => {
     const v = it[sp.key];
-    if (v) parts.push(sp.key === "state" ? esc(v) : esc(sp.label) + ": " + esc(v));
+    if (v !== undefined && v !== null && v !== "") parts.push(esc(String(v)) + (sp.unit ? " " + sp.unit : ""));
   });
   return parts.length ? parts.join(" • ") : "—";
+}
+/* اسم الصنف الكامل مع مواصفاته كما أُدخلت (للسحب/الإرجاع والسجل) */
+function storageItemFullLabel(it) {
+  const head = it.sub ? `${esc(it.category)} ${esc(it.sub)}` : esc(it.category);
+  const specs = storageSpecCells(it);
+  return specs && specs !== "—" ? `${head} — ${specs}` : head;
 }
 function storageSearchRow(it) {
   return `<tr>
@@ -1829,19 +1863,26 @@ function storageHomeResultsHtml() {
     </table></div>`;
 }
 function storageHomeHtml() {
-  const buttons = STORAGE_CATS.map((c) => {
-    const ready = !!STORAGE_SCHEMA[c];
-    const count = storageItems().filter((it) => it.category === c).length;
-    return `<button class="storage-cat-btn${ready ? "" : " soon"}" onclick="storageOpenCat('${c}')">
-      <span class="storage-cat-name">${esc(c)}</span>
-      <span class="storage-cat-sub">${ready ? count.toLocaleString("ar-EG") + " صنف" : "قريباً"}</span>
-    </button>`;
+  const groups = STORAGE_HOME_GROUPS.map((g) => {
+    const inner = g.types.length
+      ? g.types.map((t) => {
+          const count = storageItems().filter((it) => it.category === t).length;
+          return `<button class="storage-cat-btn" onclick="storageOpenCat('${t}')">
+            <span class="storage-cat-name">${esc(t)}</span>
+            <span class="storage-cat-sub">${count.toLocaleString("ar-EG")} صنف</span>
+          </button>`;
+        }).join("")
+      : `<button class="storage-cat-btn soon" disabled><span class="storage-cat-name">${esc(g.name)}</span><span class="storage-cat-sub">قريباً</span></button>`;
+    return `<div class="storage-group">
+      <div class="storage-group-head">${esc(g.name)}</div>
+      <div class="storage-cats">${inner}</div>
+    </div>`;
   }).join("");
   return `
     <div class="section-head"><h2 class="page-title" style="margin:0">المخزن</h2></div>
-    <div class="search-bar"><input type="text" id="storage-home-search" placeholder="ابحث بكلمات مرنة: التصنيف، اللون، المقاس، الملاحظة، التاريخ..." value="${esc(storageHomeQuery)}" /></div>
+    <div class="search-bar"><input type="text" id="storage-home-search" placeholder="ابحث بكلمات مرنة: الصنف، اللون، رقم اللون، المقاس، الملاحظة..." value="${esc(storageHomeQuery)}" /></div>
     <div id="storage-home-results">${storageHomeResultsHtml()}</div>
-    <div class="storage-cats">${buttons}</div>`;
+    ${groups}`;
 }
 function storageCatFilteredRows(cat) {
   let rows = storageItems().filter((it) => it.category === cat);
@@ -1856,8 +1897,9 @@ function storageOutstanding(itemId) { return storageActiveWithdrawals(itemId).re
 function storageCatRow(it) {
   const out = storageOutstanding(it.id);
   const active = storageActiveWithdrawals(it.id);
+  const hasSubs = storageSubsOf(it.category).length > 0;
   return `<tr>
-    <td class="num">${esc(it.sub) || "—"}</td>
+    ${hasSubs ? `<td class="num">${esc(it.sub) || "—"}</td>` : ""}
     <td>${storageSpecCells(it)}</td>
     <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${out.toLocaleString("ar-EG")}</div>` : ""}</td>
     <td>${it.note ? esc(it.note) : "—"}</td>
@@ -1873,7 +1915,8 @@ function storageCatRow(it) {
 }
 function storageCatBodyHtml(cat) {
   const rows = storageCatFilteredRows(cat);
-  return rows.length ? rows.map((it) => storageCatRow(it)).join("") : `<tr><td colspan="${canEditStorage() ? 6 : 5}" class="empty-msg">لا أصناف.</td></tr>`;
+  const cols = (storageSubsOf(cat).length ? 4 : 3) + (canEditStorage() ? 1 : 0);
+  return rows.length ? rows.map((it) => storageCatRow(it)).join("") : `<tr><td colspan="${cols}" class="empty-msg">لا أصناف.</td></tr>`;
 }
 function storageCatInfoHtml(cat) {
   const rows = storageCatFilteredRows(cat);
@@ -1882,18 +1925,23 @@ function storageCatInfoHtml(cat) {
 }
 function storageCategoryHtml(cat) {
   const subs = storageSubsOf(cat);
-  const subBtns = [`<button class="chip${storageSubFilter === "" ? " active" : ""}" onclick="storageSetSub('')">الكل</button>`]
-    .concat(subs.map((s) => `<button class="chip${storageSubFilter === s ? " active" : ""}" onclick="storageSetSub('${s}')">${esc(s)}</button>`)).join("");
-  const addBtns = canEditStorage() ? subs.map((s) => `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '${s}')">+ ${esc(cat)} ${esc(s)}</button>`).join(" ") : "";
+  const hasSubs = subs.length > 0;
+  const subBtns = hasSubs ? [`<button class="chip${storageSubFilter === "" ? " active" : ""}" onclick="storageSetSub('')">الكل</button>`]
+    .concat(subs.map((s) => `<button class="chip${storageSubFilter === s ? " active" : ""}" onclick="storageSetSub('${s}')">${esc(s)}</button>`)).join("") : "";
+  const addBtns = canEditStorage()
+    ? (hasSubs
+        ? subs.map((s) => `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '${s}')">+ ${esc(cat)} ${esc(s)}</button>`).join(" ")
+        : `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '')">+ ${esc(cat)}</button>`)
+    : "";
   return `
     <button class="btn btn-outline btn-back" onclick="storageOpenHome()">↩ العودة للمخزن</button>
     <div class="section-head"><h2 class="page-title" style="margin:0">${esc(cat)}</h2></div>
     ${addBtns ? `<div class="btn-group" style="margin-bottom:12px">${addBtns}</div>` : ""}
     <div class="search-bar"><input type="text" id="storage-cat-search" placeholder="ابحث داخل ${esc(cat)} (لون، مقاس، ملاحظة...)" value="${esc(storageCatQuery)}" /></div>
-    <div class="chips-row">${subBtns}</div>
+    ${hasSubs ? `<div class="chips-row">${subBtns}</div>` : ""}
     <p class="info-line" id="storage-cat-info">${storageCatInfoHtml(cat)}</p>
     <div class="table-wrap"><table class="data zebra">
-      <thead><tr><th>المقاس (mm)</th><th>المواصفات</th><th>الكمية</th><th>الملاحظة</th><th>التاريخ</th>${canEditStorage() ? "<th>إجراءات</th>" : ""}</tr></thead>
+      <thead><tr>${hasSubs ? "<th>المقاس (mm)</th>" : ""}<th>المواصفات</th><th>الكمية</th><th>الملاحظة</th><th>التوقيت</th>${canEditStorage() ? "<th>إجراءات</th>" : ""}</tr></thead>
       <tbody id="storage-cat-body">${storageCatBodyHtml(cat)}</tbody>
     </table></div>`;
 }
@@ -1946,7 +1994,7 @@ function storageTempsTabHtml() {
   const rows = list.map((w) => {
     const it = storageItems().find((x) => x.id === w.itemId);
     const outstanding = w.amount - w.returned;
-    const label = it ? `${esc(it.category)} ${esc(it.sub)}${it.state ? " — " + esc(it.state) : ""}` : "—";
+    const label = it ? storageItemFullLabel(it) : "—";
     return `<tr>
       <td>${label}</td>
       <td class="num"><b>${outstanding.toLocaleString("ar-EG")}</b></td>
@@ -1977,7 +2025,7 @@ async function storageDoReturn(wId, amt) {
   try {
     await Store.returnTempWithdrawal(wId, amt);
     const it = storageItems().find((x) => x.id === w.itemId);
-    await logStore(w.itemId, it ? it.category : "", it ? it.sub : "", "returned", amt, w.reason);
+    await logStore(w.itemId, it ? it.category : "", it ? it.sub : "", "returned", amt, w.reason, it ? storageSpecCells(it) : "");
     toast("تم إرجاع الكمية"); return true;
   } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); return false; }
 }
@@ -1997,14 +2045,24 @@ function storageEventsFiltered() {
     evs = evs.filter((e) => { const k = cairoDayKey(e.date); return (!storageHistFrom || k >= storageHistFrom) && (!storageHistTo || k <= storageHistTo); });
   }
   if (storageHistType) evs = evs.filter((e) => e.type === storageHistType);
+  if (storageHistItem) evs = evs.filter((e) => (e.category + "|" + e.sub) === storageHistItem);
   return evs.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+/* قائمة بأسماء الأصناف (التصنيف + المقاس) الموجودة في السجل — للفلترة */
+function storageEventItemTypes() {
+  const m = new Map();
+  (DB.storageEvents || []).forEach((e) => {
+    const k = e.category + "|" + e.sub;
+    if (!m.has(k)) m.set(k, (e.category + (e.sub ? " " + e.sub : "")).trim());
+  });
+  return [...m.entries()].map(([k, label]) => ({ k, label })).sort((a, b) => a.label.localeCompare(b.label, "ar"));
 }
 function storageHistRows() {
   const evs = storageEventsFiltered();
   return evs.length ? evs.map((e) => `<tr>
     <td>${fmtDateTime(e.date)}</td>
     <td>${storageEventBadge(e.type)}</td>
-    <td>${esc(e.category)} ${esc(e.sub)}</td>
+    <td>${esc(e.category)}${e.sub ? " " + esc(e.sub) : ""}${e.specs ? " — " + esc(e.specs) : ""}</td>
     <td class="num">${e.amount ? e.amount.toLocaleString("ar-EG") : "—"}</td>
     <td>${e.reason ? esc(e.reason) : "—"}</td>
     <td>${e.actor ? esc(e.actor) : "—"}</td>
@@ -2013,6 +2071,7 @@ function storageHistRows() {
 }
 function storageHistoryHtml() {
   const typeOpts = ['<option value="">كل الأنواع</option>'].concat(Object.keys(STORAGE_EVENT_LABELS).map((k) => `<option value="${k}"${storageHistType === k ? " selected" : ""}>${STORAGE_EVENT_LABELS[k]}</option>`)).join("");
+  const itemOpts = ['<option value="">كل الأصناف</option>'].concat(storageEventItemTypes().map((o) => `<option value="${esc(o.k)}"${storageHistItem === o.k ? " selected" : ""}>${esc(o.label)}</option>`)).join("");
   return `
     <div class="hist-presets">
       <button class="btn btn-outline btn-sm" onclick="storageHistPreset('today')">اليوم</button>
@@ -2024,7 +2083,8 @@ function storageHistoryHtml() {
     <div class="filter-bar">
       <label>من تاريخ <input type="date" id="sh-from" value="${esc(storageHistFrom)}" onchange="storageHistChanged()" /></label>
       <label>إلى تاريخ <input type="date" id="sh-to" value="${esc(storageHistTo)}" onchange="storageHistChanged()" /></label>
-      <label>النوع <select id="sh-type" onchange="storageHistChanged()">${typeOpts}</select></label>
+      <label>الصنف <select id="sh-item" onchange="storageHistChanged()">${itemOpts}</select></label>
+      <label>الإجراء <select id="sh-type" onchange="storageHistChanged()">${typeOpts}</select></label>
     </div>
     <p class="info-line"><b id="storage-hist-count">${storageEventsFiltered().length.toLocaleString("ar-EG")}</b> حدث.</p>
     <div class="table-wrap"><table class="data zebra">
@@ -2042,10 +2102,11 @@ function storageHistRefresh() {
   if (count) count.textContent = storageEventsFiltered().length.toLocaleString("ar-EG");
 }
 function storageHistChanged() {
-  const f = $("#sh-from"), t = $("#sh-to"), ty = $("#sh-type");
+  const f = $("#sh-from"), t = $("#sh-to"), ty = $("#sh-type"), itm = $("#sh-item");
   if (f) storageHistFrom = f.value;
   if (t) storageHistTo = t.value;
   if (ty) storageHistType = ty.value;
+  if (itm) storageHistItem = itm.value;
   storageHistRefresh();
 }
 /* أزرار جاهزة لاختيار المدى الزمني بسهولة بدل كتابة التاريخ يدوياً */
@@ -2056,13 +2117,14 @@ function storageHistPreset(kind) {
     const d = new Date(); d.setDate(d.getDate() - (kind === "7" ? 6 : 29));
     storageHistFrom = cairoDayKey(d); storageHistTo = today;
   } else if (kind === "month") { storageHistFrom = today.slice(0, 8) + "01"; storageHistTo = today; }
-  else { storageHistFrom = ""; storageHistTo = ""; storageHistType = ""; }
+  else { storageHistFrom = ""; storageHistTo = ""; storageHistType = ""; storageHistItem = ""; }
   const root = document.querySelector(storageRoot);
   if (root) {
-    const f = root.querySelector("#sh-from"), t = root.querySelector("#sh-to"), ty = root.querySelector("#sh-type");
+    const f = root.querySelector("#sh-from"), t = root.querySelector("#sh-to"), ty = root.querySelector("#sh-type"), itm = root.querySelector("#sh-item");
     if (f) f.value = storageHistFrom;
     if (t) t.value = storageHistTo;
     if (ty && kind === "all") ty.value = "";
+    if (itm && kind === "all") itm.value = "";
   }
   storageHistRefresh();
 }
@@ -2072,14 +2134,17 @@ function storageAddForm(cat, sub) {
   const controllers = new Set(specs.filter((s) => s.showIf).map((s) => s.showIf.key));
   const fields = specs.map((sp) => {
     const hidden = sp.showIf ? ' style="display:none"' : "";
+    const lbl = esc(sp.label) + (sp.opt ? " (اختياري)" : "");
     if (sp.type === "select") {
       const opts = ['<option value="">—</option>'].concat(sp.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)).join("");
       const onCh = controllers.has(sp.key) ? ` onchange="storageFormCond('${cat}')"` : "";
-      return `<div class="field" id="stf-${sp.key}"${hidden}><label>${esc(sp.label)}</label><select id="st-${sp.key}"${onCh}>${opts}</select></div>`;
+      return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><select id="st-${sp.key}"${onCh}>${opts}</select></div>`;
     }
-    return `<div class="field" id="stf-${sp.key}"${hidden}><label>${esc(sp.label)}</label><input type="text" id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
+    const inType = sp.type === "number" ? "number" : "text";
+    const minAttr = sp.type === "number" ? ' min="0"' : "";
+    return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><input type="${inType}"${minAttr} id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
   }).join("");
-  openModal(`${cat} ${sub} — صنف جديد`, `
+  openModal(`${sub ? cat + " " + sub : cat} — صنف جديد`, `
     <div class="form-grid">
       ${fields}
       <div class="field"><label>الكمية</label><input type="number" id="st-qty" min="0" placeholder="0" /></div>
@@ -2103,19 +2168,20 @@ function storageFormCond(cat) {
   });
 }
 async function storageSaveNew(cat, sub) {
-  const obj = { category: cat, sub: sub, quantity: Number($("#st-qty") ? $("#st-qty").value : 0) || 0, note: ($("#st-note") ? $("#st-note").value : "").trim() };
+  const qtyRaw = $("#st-qty") ? $("#st-qty").value.trim() : "";
+  const obj = { category: cat, sub: sub, quantity: Number(qtyRaw) || 0, note: ($("#st-note") ? $("#st-note").value : "").trim() };
   const specs = storageSpecsOf(cat);
   specs.forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
-  // الحقول الشرطية: تُفرَّغ إن لم يتحقّق شرطها، وتصير إلزامية إن تحقّق
+  // التحقّق: كل الحقول إلزامية إلا ما عليه opt (رقم اللون والملاحظة)، والشرطية تلزم عند تحقّق شرطها فقط
   for (const sp of specs) {
-    if (!sp.showIf) continue;
-    const met = obj[sp.showIf.key] === sp.showIf.value;
-    if (!met) { obj[sp.key] = ""; }
-    else if (!obj[sp.key]) { toast("يرجى اختيار " + sp.label, true); return; }
+    const met = !sp.showIf || obj[sp.showIf.key] === sp.showIf.value;
+    if (sp.showIf && !met) { obj[sp.key] = ""; continue; }
+    if (!sp.opt && !obj[sp.key]) { toast("الحقل «" + sp.label + "» إلزامي", true); return; }
   }
+  if (qtyRaw === "") { toast("الكمية إلزامية", true); return; }
   try {
     const rec = await Store.addStorageItem(obj);
-    await logStore(rec ? rec.id : null, cat, sub, "item_added", obj.quantity, obj.note);
+    await logStore(rec ? rec.id : null, cat, sub, "item_added", obj.quantity, obj.note, storageSpecCells(rec || obj));
     closeModal(); toast("تمت إضافة الصنف"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الصنف"), true); }
 }
@@ -2141,7 +2207,7 @@ async function storageApplyQty(id, mode) {
   if (newQty < 0) { toast("الكمية المسحوبة أكبر من المتوفّر (" + it.quantity.toLocaleString("ar-EG") + ")", true); return; }
   try {
     await Store.updateStorageItem(id, { quantity: newQty });
-    await logStore(id, it.category, it.sub, mode === "add" ? "qty_added" : "qty_withdrawn", amt, "");
+    await logStore(id, it.category, it.sub, mode === "add" ? "qty_added" : "qty_withdrawn", amt, "", storageSpecCells(it));
     closeModal(); toast(mode === "add" ? "تمت إضافة الكمية" : "تم سحب الكمية"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر تحديث الكمية"), true); }
 }
@@ -2169,7 +2235,7 @@ async function storageSaveTemp(id) {
   if (!reason) { toast("يرجى كتابة سبب السحب المؤقت", true); return; }
   try {
     await Store.addTempWithdrawal(id, amt, reason);
-    await logStore(id, it.category, it.sub, "temp_withdrawn", amt, reason);
+    await logStore(id, it.category, it.sub, "temp_withdrawn", amt, reason, storageSpecCells(it));
     closeModal(); toast("تم السحب المؤقت"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر السحب المؤقت"), true); }
 }
@@ -2217,7 +2283,7 @@ function storageDeleteItem(id) {
   confirmDialog("حذف صنف", `سيتم حذف «${it.category} ${it.sub}» نهائياً مع كل سحوباته المؤقتة. متأكد؟`, async () => {
     try {
       await Store.deleteStorageItem(id);
-      await logStore(null, it.category, it.sub, "item_deleted", it.quantity, "");
+      await logStore(null, it.category, it.sub, "item_deleted", it.quantity, "", storageSpecCells(it));
       toast("تم حذف الصنف"); renderStorage();
     } catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
   });
