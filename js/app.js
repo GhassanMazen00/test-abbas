@@ -1752,7 +1752,7 @@ const STORAGE_SCHEMA = {
     specs: [
       { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
       { key: "color", label: "اللون", type: "text" },
-      { key: "colorNum", label: "رقم اللون", type: "number", opt: true },
+      { key: "colorNum", label: "رقم اللون", type: "text", opt: true },
       { key: "size", label: "المقاس (سم)", type: "number", unit: "سم" },
       { key: "jarrarShape", label: "شكل الجرار", type: "text" }
     ]
@@ -1762,7 +1762,7 @@ const STORAGE_SCHEMA = {
     specs: [
       { key: "jarrarShape", label: "نوع السن", type: "text" },
       { key: "color", label: "اللون", type: "text" },
-      { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
+      { key: "colorNum", label: "رقم اللون", type: "text", opt: true }
     ]
   },
   "نايلون": {
@@ -1781,14 +1781,14 @@ const STORAGE_SCHEMA = {
     specs: [
       { key: "jarrarShape", label: "نوع السن", type: "text" },
       { key: "color", label: "اللون", type: "text" },
-      { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
+      { key: "colorNum", label: "رقم اللون", type: "text", opt: true }
     ]
   },
   "مسحورة 3mm": {
     subs: [],
     specs: [
       { key: "color", label: "اللون", type: "text" },
-      { key: "colorNum", label: "رقم اللون", type: "number", opt: true },
+      { key: "colorNum", label: "رقم اللون", type: "text", opt: true },
       { key: "size", label: "المقاس", type: "text" }
     ]
   }
