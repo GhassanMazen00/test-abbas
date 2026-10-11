@@ -675,3 +675,11 @@ table.bill-items input:focus { outline: 2px solid var(--primary); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid .field-full { grid-column: 1 / -1; }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
+
+/* السحب المؤقت (إعارة) */
+.qty-sub { font-size: 12px; color: var(--warning); font-weight: 700; margin-top: 2px; }
+.temp-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.temp-row:last-of-type { border-bottom: 0; }
+.temp-info { flex: 1 1 220px; }
+.temp-ret { display: flex; gap: 6px; align-items: center; }
+.temp-ret input { width: 120px; }
