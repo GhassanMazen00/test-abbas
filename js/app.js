@@ -1743,7 +1743,7 @@ const STORAGE_CATS = ["عضم", "نايلون", "جرار"];
 // الصفحة الرئيسية مجمّعة: كل مجموعة فيها أنواع أصناف مستقلة (رول/مسحورة تحت نفس المجموعة)
 const STORAGE_HOME_GROUPS = [
   { name: "عضم", types: ["عضم", "رول عضم"] },
-  { name: "نايلون", types: ["نايلون", "رول نايلون", "مسحورة"] },
+  { name: "نايلون", types: ["نايلون", "رول نايلون", "مسحورة 3mm"] },
   { name: "جرار", types: [] } // قريباً
 ];
 const STORAGE_SCHEMA = {
@@ -1760,6 +1760,7 @@ const STORAGE_SCHEMA = {
   "رول عضم": {
     subs: ["3mm", "5mm", "8mm"],
     specs: [
+      { key: "jarrarShape", label: "نوع السن", type: "text" },
       { key: "color", label: "اللون", type: "text" },
       { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
     ]
@@ -1778,11 +1779,12 @@ const STORAGE_SCHEMA = {
   "رول نايلون": {
     subs: ["3mm", "5mm", "7mm"],
     specs: [
+      { key: "jarrarShape", label: "نوع السن", type: "text" },
       { key: "color", label: "اللون", type: "text" },
       { key: "colorNum", label: "رقم اللون", type: "number", opt: true }
     ]
   },
-  "مسحورة": {
+  "مسحورة 3mm": {
     subs: [],
     specs: [
       { key: "color", label: "اللون", type: "text" },
