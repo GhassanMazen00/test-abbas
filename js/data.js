@@ -47,16 +47,19 @@ function initDB() {
       cancelled: [],
       storage: [],
       storageWithdrawals: [],
-      seq: { bill: 0, payment: 0, cancelled: 0, storage: 0, withdrawal: 0 }
+      storageEvents: [],
+      seq: { bill: 0, payment: 0, cancelled: 0, storage: 0, withdrawal: 0, event: 0 }
     };
     saveDB(db);
   }
   if (!db.cancelled) db.cancelled = [];
   if (!db.storage) db.storage = [];
   if (!db.storageWithdrawals) db.storageWithdrawals = [];
+  if (!db.storageEvents) db.storageEvents = [];
   if (db.seq && db.seq.cancelled == null) db.seq.cancelled = 0;
   if (db.seq && db.seq.storage == null) db.seq.storage = 0;
   if (db.seq && db.seq.withdrawal == null) db.seq.withdrawal = 0;
+  if (db.seq && db.seq.event == null) db.seq.event = 0;
   return db;
 }
 
