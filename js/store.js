@@ -21,6 +21,7 @@ const Store = (function () {
   const mapCancelled = (r) => ({ id: r.id, docNo: r.doc_no || "", customerName: r.customer_name || "", items: r.items || [], total: Number(r.total) || 0, reason: r.reason || "", date: r.created_at });
   const mapStorage = (r) => ({ id: r.id, category: r.category || "", sub: r.sub || "", state: r.state || "", openType: r.open_type || "", color: r.color || "", size: r.size || "", jarrarShape: r.jarrar_shape || "", quantity: Number(r.quantity) || 0, note: r.note || "", date: r.created_at });
   const mapWithdrawal = (r) => ({ id: r.id, itemId: r.item_id, amount: Number(r.amount) || 0, returned: Number(r.returned) || 0, reason: r.reason || "", date: r.created_at });
+  const mapEvent = (r) => ({ id: r.id, itemId: r.item_id, category: r.category || "", sub: r.sub || "", type: r.type || "", amount: Number(r.amount) || 0, reason: r.reason || "", actor: r.actor || "", date: r.created_at });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -93,6 +94,9 @@ const Store = (function () {
       // السحوبات المؤقتة (إعارة) — سجلّ مستقل
       DB.storageWithdrawals = [];
       try { DB.storageWithdrawals = (await this.fetchAllRows("storage_withdrawals")).map(mapWithdrawal); } catch (e) { DB.storageWithdrawals = []; }
+      // سجلّ أحداث المخزن (تدقيق) — بتوقيت القاهرة عند العرض
+      DB.storageEvents = [];
+      try { DB.storageEvents = (await this.fetchAllRows("storage_events")).map(mapEvent); } catch (e) { DB.storageEvents = []; }
     },
 
     /* ---------- العملاء ---------- */
@@ -283,6 +287,22 @@ const Store = (function () {
       if (e2) throw e2;
       w.returned = newReturned;
       if (it) it.quantity = newQty;
+    },
+    /* تسجيل حدث في سجلّ المخزن (ثانوي — لا يُفشل العملية الأساسية إن غاب الجدول) */
+    async logStorageEvent(ev) {
+      const row = { item_id: ev.itemId || null, category: ev.category || "", sub: ev.sub || "", type: ev.type || "", amount: Number(ev.amount) || 0, reason: ev.reason || "", actor: ev.actor || "" };
+      if (!useSupabase) {
+        if (!DB.storageEvents) DB.storageEvents = [];
+        if (!DB.seq.event) DB.seq.event = 0;
+        DB.seq.event++;
+        const rec = { id: DB.seq.event, itemId: row.item_id, category: row.category, sub: row.sub, type: row.type, amount: row.amount, reason: row.reason, actor: row.actor, date: new Date().toISOString() };
+        DB.storageEvents.push(rec); saveDB(DB); return rec;
+      }
+      try {
+        const { data, error } = await sb.from("storage_events").insert(row).select().single();
+        if (error) throw error;
+        const rec = mapEvent(data); if (!DB.storageEvents) DB.storageEvents = []; DB.storageEvents.push(rec); return rec;
+      } catch (e) { return null; }
     },
 
     /* ---------- طلبات الدخول (موافقة المدير) ---------- */

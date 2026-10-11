@@ -1765,6 +1765,24 @@ const STORAGE_SCHEMA = {
 };
 let storageRoot = "#storage-content";
 let storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
+let storageTab = "store"; // store | temps | history
+let storageHistFrom = "", storageHistTo = "", storageHistType = "";
+const STORAGE_EVENT_LABELS = {
+  item_added: "إضافة صنف",
+  qty_added: "إضافة كمية",
+  qty_withdrawn: "سحب كمية",
+  temp_withdrawn: "سحب مؤقت",
+  returned: "إرجاع"
+};
+const STORAGE_EVENT_BADGE = {
+  item_added: "badge-success", qty_added: "badge-success", qty_withdrawn: "badge-warning",
+  temp_withdrawn: "badge-transfer", returned: "badge-success"
+};
+function storageEventBadge(type) { return `<span class="badge ${STORAGE_EVENT_BADGE[type] || ""}">${STORAGE_EVENT_LABELS[type] || esc(type)}</span>`; }
+/* تسجيل حدث في سجلّ المخزن (بتوقيت القاهرة عند العرض) */
+function logStore(itemId, cat, sub, type, amount, reason) {
+  return Store.logStorageEvent({ itemId: itemId, category: cat, sub: sub, type: type, amount: amount, reason: reason, actor: (currentUser ? currentUser.username : "") });
+}
 function canEditStorage(u) { u = u || currentUser; return !!u && (isStorageUser(u) || u.role === "manager"); }
 function storageItems() { return DB.storage || []; }
 function storageSpecsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].specs) || []; }
@@ -1794,7 +1812,7 @@ function storageSearchRow(it) {
     <td>${storageSpecCells(it)}</td>
     <td class="num">${Number(it.quantity).toLocaleString("ar-EG")}</td>
     <td>${it.note ? esc(it.note) : "—"}</td>
-    <td>${fmtDate(it.date)}</td>
+    <td>${fmtDateTime(it.date)}</td>
   </tr>`;
 }
 function storageHomeResultsHtml() {
@@ -1840,7 +1858,7 @@ function storageCatRow(it) {
     <td>${storageSpecCells(it)}</td>
     <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${out.toLocaleString("ar-EG")}</div>` : ""}</td>
     <td>${it.note ? esc(it.note) : "—"}</td>
-    <td>${fmtDate(it.date)}</td>
+    <td>${fmtDateTime(it.date)}</td>
     ${canEditStorage() ? `<td class="row-actions">
       <button class="btn btn-success btn-sm" onclick="storageQtyForm(${it.id}, 'add')">+ كمية</button>
       <button class="btn btn-warning btn-sm" onclick="storageQtyForm(${it.id}, 'withdraw')">− سحب</button>
@@ -1875,10 +1893,26 @@ function storageCategoryHtml(cat) {
       <tbody id="storage-cat-body">${storageCatBodyHtml(cat)}</tbody>
     </table></div>`;
 }
+function storageAllActiveWithdrawals() {
+  return (DB.storageWithdrawals || []).filter((w) => (w.amount - w.returned) > 0).sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function storageActiveCount() { return storageAllActiveWithdrawals().length; }
+function storageTabBar() {
+  const n = storageActiveCount();
+  return `<nav class="tabs storage-tabs">
+    <button class="tab ${storageTab === "store" ? "active" : ""}" onclick="storageSwitchTab('store')">المخزن</button>
+    <button class="tab ${storageTab === "temps" ? "active" : ""}" onclick="storageSwitchTab('temps')">مسحوب / إرجاع${n ? ` <span class="tab-badge">${n.toLocaleString("ar-EG")}</span>` : ""}</button>
+    <button class="tab ${storageTab === "history" ? "active" : ""}" onclick="storageSwitchTab('history')">السجل</button>
+  </nav>`;
+}
 function renderStorage() {
   const el = document.querySelector(storageRoot);
   if (!el) return;
-  el.innerHTML = storageCat ? storageCategoryHtml(storageCat) : storageHomeHtml();
+  let content;
+  if (storageTab === "temps") content = storageTempsTabHtml();
+  else if (storageTab === "history") content = storageHistoryHtml();
+  else content = storageCat ? storageCategoryHtml(storageCat) : storageHomeHtml();
+  el.innerHTML = storageTabBar() + content;
   const hs = el.querySelector("#storage-home-search");
   if (hs) hs.oninput = () => { storageHomeQuery = hs.value; const r = el.querySelector("#storage-home-results"); if (r) r.innerHTML = storageHomeResultsHtml(); };
   const cs = el.querySelector("#storage-cat-search");
@@ -1888,17 +1922,110 @@ function renderStorage() {
     const info = el.querySelector("#storage-cat-info"); if (info) info.innerHTML = storageCatInfoHtml(storageCat);
   };
 }
+function storageSwitchTab(t) { storageTab = t; if (t !== "store") storageCat = null; renderStorage(); }
 function storageOpenHome(root) {
   if (root) storageRoot = root;
-  storageCat = null; storageSubFilter = ""; storageHomeQuery = "";
+  storageTab = "store"; storageCat = null; storageSubFilter = ""; storageHomeQuery = "";
   renderStorage();
 }
 function storageOpenCat(cat) {
   if (!STORAGE_SCHEMA[cat]) { toast("تصنيف «" + cat + "» قيد الإعداد — قريباً"); return; }
-  storageCat = cat; storageCatQuery = ""; storageSubFilter = "";
+  storageTab = "store"; storageCat = cat; storageCatQuery = ""; storageSubFilter = "";
   renderStorage();
 }
 function storageSetSub(sub) { storageSubFilter = sub; renderStorage(); }
+/* ---------- تبويب «مسحوب / إرجاع»: كل السحوبات المؤقتة القائمة مع التحكّم ---------- */
+function storageTempsTabHtml() {
+  const list = storageAllActiveWithdrawals();
+  if (!list.length) return '<p class="empty-msg">لا يوجد مسحوب مؤقت قائم حالياً.</p>';
+  const total = list.reduce((s, w) => s + (w.amount - w.returned), 0);
+  const rows = list.map((w) => {
+    const it = storageItems().find((x) => x.id === w.itemId);
+    const outstanding = w.amount - w.returned;
+    const label = it ? `${esc(it.category)} ${esc(it.sub)}${it.state ? " — " + esc(it.state) : ""}` : "—";
+    return `<tr>
+      <td>${label}</td>
+      <td class="num"><b>${outstanding.toLocaleString("ar-EG")}</b></td>
+      <td class="num">${w.amount.toLocaleString("ar-EG")}</td>
+      <td class="num">${w.returned.toLocaleString("ar-EG")}</td>
+      <td>${w.reason ? esc(w.reason) : "—"}</td>
+      <td>${fmtDateTime(w.date)}</td>
+      ${canEditStorage() ? `<td class="row-actions temp-ret">
+        <input type="number" id="gret-${w.id}" min="1" max="${outstanding}" placeholder="كمية" />
+        <button class="btn btn-success btn-sm" onclick="storageReturnGlobal(${w.id})">إرجاع</button>
+        <button class="btn btn-outline btn-sm" onclick="storageReturnAllGlobal(${w.id})">الكل</button>
+      </td>` : ""}
+    </tr>`;
+  }).join("");
+  return `<p class="info-line">إجمالي المسحوب مؤقتاً: <b>${total.toLocaleString("ar-EG")}</b> — <b>${list.length.toLocaleString("ar-EG")}</b> سحبة قائمة.</p>
+    <div class="table-wrap"><table class="data zebra">
+      <thead><tr><th>الصنف</th><th>خارج الآن</th><th>مسحوب</th><th>مُرجع</th><th>السبب</th><th>التوقيت (القاهرة)</th>${canEditStorage() ? "<th>إرجاع</th>" : ""}</tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+async function storageDoReturn(wId, amt) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return false;
+  const outstanding = w.amount - w.returned;
+  if (!amt) { toast("أدخل كمية الإرجاع", true); return false; }
+  if (amt > outstanding) { toast("الكمية أكبر من المتبقّي خارج المخزن (" + outstanding.toLocaleString("ar-EG") + ")", true); return false; }
+  try {
+    await Store.returnTempWithdrawal(wId, amt);
+    const it = storageItems().find((x) => x.id === w.itemId);
+    await logStore(w.itemId, it ? it.category : "", it ? it.sub : "", "returned", amt, w.reason);
+    toast("تم إرجاع الكمية"); return true;
+  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); return false; }
+}
+async function storageReturnGlobal(wId) {
+  const amt = Math.abs(Number($("#gret-" + wId) ? $("#gret-" + wId).value : 0) || 0);
+  if (await storageDoReturn(wId, amt)) renderStorage();
+}
+async function storageReturnAllGlobal(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  if (await storageDoReturn(wId, w.amount - w.returned)) renderStorage();
+}
+/* ---------- تبويب «السجل»: كل أحداث المخزن مع فلتر تاريخ وتوقيت القاهرة ---------- */
+function storageEventsFiltered() {
+  let evs = (DB.storageEvents || []).slice();
+  if (storageHistFrom || storageHistTo) {
+    evs = evs.filter((e) => { const k = cairoDayKey(e.date); return (!storageHistFrom || k >= storageHistFrom) && (!storageHistTo || k <= storageHistTo); });
+  }
+  if (storageHistType) evs = evs.filter((e) => e.type === storageHistType);
+  return evs.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
+function storageHistoryHtml() {
+  const evs = storageEventsFiltered();
+  const typeOpts = ['<option value="">كل الأنواع</option>'].concat(Object.keys(STORAGE_EVENT_LABELS).map((k) => `<option value="${k}"${storageHistType === k ? " selected" : ""}>${STORAGE_EVENT_LABELS[k]}</option>`)).join("");
+  const rows = evs.length ? evs.map((e) => `<tr>
+    <td>${fmtDateTime(e.date)}</td>
+    <td>${storageEventBadge(e.type)}</td>
+    <td>${esc(e.category)} ${esc(e.sub)}</td>
+    <td class="num">${e.amount ? e.amount.toLocaleString("ar-EG") : "—"}</td>
+    <td>${e.reason ? esc(e.reason) : "—"}</td>
+    <td>${e.actor ? esc(e.actor) : "—"}</td>
+  </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا أحداث مطابقة.</td></tr>';
+  return `
+    <div class="filter-bar">
+      <label>من تاريخ <input type="date" id="sh-from" value="${esc(storageHistFrom)}" onchange="storageHistChanged()" /></label>
+      <label>إلى تاريخ <input type="date" id="sh-to" value="${esc(storageHistTo)}" onchange="storageHistChanged()" /></label>
+      <label>النوع <select id="sh-type" onchange="storageHistChanged()">${typeOpts}</select></label>
+      <button class="btn btn-outline btn-sm" onclick="storageHistClear()">مسح</button>
+    </div>
+    <p class="info-line"><b>${evs.length.toLocaleString("ar-EG")}</b> حدث.</p>
+    <div class="table-wrap"><table class="data zebra">
+      <thead><tr><th>التوقيت (القاهرة)</th><th>الإجراء</th><th>الصنف</th><th>الكمية</th><th>التفاصيل</th><th>المستخدم</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+function storageHistChanged() {
+  const f = $("#sh-from"), t = $("#sh-to"), ty = $("#sh-type");
+  if (f) storageHistFrom = f.value;
+  if (t) storageHistTo = t.value;
+  if (ty) storageHistType = ty.value;
+  renderStorage();
+}
+function storageHistClear() { storageHistFrom = ""; storageHistTo = ""; storageHistType = ""; renderStorage(); }
 function storageAddForm(cat, sub) {
   if (!canEditStorage()) return;
   const specs = storageSpecsOf(cat);
@@ -1947,7 +2074,8 @@ async function storageSaveNew(cat, sub) {
     else if (!obj[sp.key]) { toast("يرجى اختيار " + sp.label, true); return; }
   }
   try {
-    await Store.addStorageItem(obj);
+    const rec = await Store.addStorageItem(obj);
+    await logStore(rec ? rec.id : null, cat, sub, "item_added", obj.quantity, obj.note);
     closeModal(); toast("تمت إضافة الصنف"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الصنف"), true); }
 }
@@ -1973,6 +2101,7 @@ async function storageApplyQty(id, mode) {
   if (newQty < 0) { toast("الكمية المسحوبة أكبر من المتوفّر (" + it.quantity.toLocaleString("ar-EG") + ")", true); return; }
   try {
     await Store.updateStorageItem(id, { quantity: newQty });
+    await logStore(id, it.category, it.sub, mode === "add" ? "qty_added" : "qty_withdrawn", amt, "");
     closeModal(); toast(mode === "add" ? "تمت إضافة الكمية" : "تم سحب الكمية"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر تحديث الكمية"), true); }
 }
@@ -2000,6 +2129,7 @@ async function storageSaveTemp(id) {
   if (!reason) { toast("يرجى كتابة سبب السحب المؤقت", true); return; }
   try {
     await Store.addTempWithdrawal(id, amt, reason);
+    await logStore(id, it.category, it.sub, "temp_withdrawn", amt, reason);
     closeModal(); toast("تم السحب المؤقت"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر السحب المؤقت"), true); }
 }
@@ -2012,7 +2142,7 @@ function storageTempManage(id) {
     return `<div class="temp-row">
       <div class="temp-info">
         <div><b>خارج الآن: ${outstanding.toLocaleString("ar-EG")}</b> <span class="qty-sub">(مسحوب ${w.amount.toLocaleString("ar-EG")} — مُرجع ${w.returned.toLocaleString("ar-EG")})</span></div>
-        <div class="qty-sub">السبب: ${w.reason ? esc(w.reason) : "—"} • ${fmtDate(w.date)}</div>
+        <div class="qty-sub">السبب: ${w.reason ? esc(w.reason) : "—"} • ${fmtDateTime(w.date)}</div>
       </div>
       ${canEditStorage() ? `<div class="temp-ret">
         <input type="number" id="ret-${w.id}" min="1" max="${outstanding}" placeholder="كمية الإرجاع" />
@@ -2029,24 +2159,15 @@ function storageTempManage(id) {
 async function storageReturn(wId) {
   const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
   if (!w) return;
-  const outstanding = w.amount - w.returned;
+  const itemId = w.itemId;
   const amt = Math.abs(Number($("#ret-" + wId) ? $("#ret-" + wId).value : 0) || 0);
-  if (!amt) { toast("أدخل كمية الإرجاع", true); return; }
-  if (amt > outstanding) { toast("الكمية أكبر من المتبقّي خارج المخزن (" + outstanding.toLocaleString("ar-EG") + ")", true); return; }
-  try {
-    await Store.returnTempWithdrawal(wId, amt);
-    toast("تم إرجاع الكمية"); renderStorage(); storageTempManage(w.itemId);
-  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
+  if (await storageDoReturn(wId, amt)) { renderStorage(); storageTempManage(itemId); }
 }
 async function storageReturnAll(wId) {
   const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
   if (!w) return;
-  const outstanding = w.amount - w.returned;
-  if (outstanding <= 0) return;
-  try {
-    await Store.returnTempWithdrawal(wId, outstanding);
-    toast("تم إرجاع كامل الكمية"); renderStorage(); storageTempManage(w.itemId);
-  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
+  const itemId = w.itemId;
+  if (await storageDoReturn(wId, w.amount - w.returned)) { renderStorage(); storageTempManage(itemId); }
 }
 
 /* ---------- تبويب العملاء ---------- */
