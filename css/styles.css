@@ -652,3 +652,26 @@ table.bill-items input:focus { outline: 2px solid var(--primary); }
   .tabs { gap: 4px; }
   .tab { padding: 9px 14px; font-size: 14px; }
 }
+
+/* ===================== المخزن (storage) ===================== */
+.storage-cats { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 18px; }
+.storage-cat-btn {
+  flex: 1 1 160px; min-height: 96px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--card);
+  cursor: pointer; font-family: inherit; transition: transform .08s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.storage-cat-btn:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--primary); }
+.storage-cat-name { font-size: 20px; font-weight: 800; color: var(--heading); }
+.storage-cat-sub { font-size: 13px; color: var(--muted); font-weight: 600; }
+.storage-cat-btn.soon { opacity: .55; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.chip {
+  border: 1px solid var(--border); background: var(--card); color: var(--text);
+  border-radius: 999px; padding: 6px 16px; cursor: pointer; font-family: inherit;
+  font-weight: 600; font-size: 14px;
+}
+.chip.active { background: var(--primary); color: var(--primary-text, #fff); border-color: var(--primary); }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-grid .field-full { grid-column: 1 / -1; }
+@media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }

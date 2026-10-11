@@ -32,7 +32,8 @@ const USERS = {
   "worker2": { password: "1234", role: "employee", name: "المراجِع" },
   "worker3": { password: "1234", role: "employee", name: "مطّلِع" },
   "odai":    { password: "1234", role: "supervisor", name: "مشرف" },
-  "worker4": { password: "1234", role: "employee", name: "عرض الفواتير" }
+  "worker4": { password: "1234", role: "employee", name: "عرض الفواتير" },
+  "storage1": { password: "1234", role: "employee", name: "المخزن" }
 };
 
 /* تهيئة قاعدة البيانات لأول مرة */
@@ -44,12 +45,15 @@ function initDB() {
       bills: [],
       payments: [],
       cancelled: [],
-      seq: { bill: 0, payment: 0, cancelled: 0 }
+      storage: [],
+      seq: { bill: 0, payment: 0, cancelled: 0, storage: 0 }
     };
     saveDB(db);
   }
   if (!db.cancelled) db.cancelled = [];
+  if (!db.storage) db.storage = [];
   if (db.seq && db.seq.cancelled == null) db.seq.cancelled = 0;
+  if (db.seq && db.seq.storage == null) db.seq.storage = 0;
   return db;
 }
 
