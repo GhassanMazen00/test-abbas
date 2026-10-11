@@ -1749,8 +1749,19 @@ const STORAGE_SCHEMA = {
       { key: "size", label: "المقاس", type: "text" },
       { key: "jarrarShape", label: "شكل الجرار", type: "text" }
     ]
+  },
+  "نايلون": {
+    subs: ["3mm", "5mm", "8mm"],
+    specs: [
+      { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
+      // يظهر فقط عند اختيار «مفتوح» — واجب الاختيار حينها
+      { key: "openType", label: "النوع", type: "select", options: ["حقن", "معدن"], showIf: { key: "state", value: "مفتوح" } },
+      { key: "color", label: "اللون", type: "text" },
+      { key: "size", label: "المقاس", type: "text" },
+      { key: "jarrarShape", label: "شكل الجرار", type: "text" }
+    ]
   }
-  // "نايلون": {...}, "جرار": {...}  ← تُضاف بنفس الصيغة لاحقاً
+  // "جرار": {...}  ← يُضاف لاحقاً بنفس الصيغة
 };
 let storageRoot = "#storage-content";
 let storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
@@ -1759,7 +1770,8 @@ function storageItems() { return DB.storage || []; }
 function storageSpecsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].specs) || []; }
 function storageSubsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].subs) || []; }
 function storageItemText(it) {
-  return [it.category, it.sub, it.state, it.color, it.size, it.jarrarShape, it.note, fmtDate(it.date)].filter(Boolean).join(" ");
+  const specVals = storageSpecsOf(it.category).map((sp) => it[sp.key]);
+  return [it.category, it.sub].concat(specVals).concat([it.note, fmtDate(it.date)]).filter(Boolean).join(" ");
 }
 function storageMatch(it, q) {
   const terms = normSearch(q).split(/\s+/).filter(Boolean);
@@ -1769,10 +1781,10 @@ function storageMatch(it, q) {
 }
 function storageSpecCells(it) {
   const parts = [];
-  if (it.state) parts.push(esc(it.state));
-  if (it.color) parts.push("اللون: " + esc(it.color));
-  if (it.size) parts.push("المقاس: " + esc(it.size));
-  if (it.jarrarShape) parts.push("شكل الجرار: " + esc(it.jarrarShape));
+  storageSpecsOf(it.category).forEach((sp) => {
+    const v = it[sp.key];
+    if (v) parts.push(sp.key === "state" ? esc(v) : esc(sp.label) + ": " + esc(v));
+  });
   return parts.length ? parts.join(" • ") : "—";
 }
 function storageSearchRow(it) {
@@ -1889,12 +1901,16 @@ function storageOpenCat(cat) {
 function storageSetSub(sub) { storageSubFilter = sub; renderStorage(); }
 function storageAddForm(cat, sub) {
   if (!canEditStorage()) return;
-  const fields = storageSpecsOf(cat).map((sp) => {
+  const specs = storageSpecsOf(cat);
+  const controllers = new Set(specs.filter((s) => s.showIf).map((s) => s.showIf.key));
+  const fields = specs.map((sp) => {
+    const hidden = sp.showIf ? ' style="display:none"' : "";
     if (sp.type === "select") {
       const opts = ['<option value="">—</option>'].concat(sp.options.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`)).join("");
-      return `<div class="field"><label>${esc(sp.label)}</label><select id="st-${sp.key}">${opts}</select></div>`;
+      const onCh = controllers.has(sp.key) ? ` onchange="storageFormCond('${cat}')"` : "";
+      return `<div class="field" id="stf-${sp.key}"${hidden}><label>${esc(sp.label)}</label><select id="st-${sp.key}"${onCh}>${opts}</select></div>`;
     }
-    return `<div class="field"><label>${esc(sp.label)}</label><input type="text" id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
+    return `<div class="field" id="stf-${sp.key}"${hidden}><label>${esc(sp.label)}</label><input type="text" id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
   }).join("");
   openModal(`${cat} ${sub} — صنف جديد`, `
     <div class="form-grid">
@@ -1907,9 +1923,29 @@ function storageAddForm(cat, sub) {
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>`);
 }
+/* إظهار/إخفاء الحقول الشرطية حسب قيمة الحقل المتحكّم (مثل: النوع يظهر عند «مفتوح») */
+function storageFormCond(cat) {
+  storageSpecsOf(cat).forEach((sp) => {
+    if (!sp.showIf) return;
+    const ctrl = $("#st-" + sp.showIf.key);
+    const wrap = document.getElementById("stf-" + sp.key);
+    if (!ctrl || !wrap) return;
+    const show = ctrl.value === sp.showIf.value;
+    wrap.style.display = show ? "" : "none";
+    if (!show) { const f = $("#st-" + sp.key); if (f) f.value = ""; }
+  });
+}
 async function storageSaveNew(cat, sub) {
   const obj = { category: cat, sub: sub, quantity: Number($("#st-qty") ? $("#st-qty").value : 0) || 0, note: ($("#st-note") ? $("#st-note").value : "").trim() };
-  storageSpecsOf(cat).forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
+  const specs = storageSpecsOf(cat);
+  specs.forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
+  // الحقول الشرطية: تُفرَّغ إن لم يتحقّق شرطها، وتصير إلزامية إن تحقّق
+  for (const sp of specs) {
+    if (!sp.showIf) continue;
+    const met = obj[sp.showIf.key] === sp.showIf.value;
+    if (!met) { obj[sp.key] = ""; }
+    else if (!obj[sp.key]) { toast("يرجى اختيار " + sp.label, true); return; }
+  }
   try {
     await Store.addStorageItem(obj);
     closeModal(); toast("تمت إضافة الصنف"); renderStorage();
