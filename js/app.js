@@ -1994,10 +1994,9 @@ function storageEventsFiltered() {
   if (storageHistType) evs = evs.filter((e) => e.type === storageHistType);
   return evs.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
-function storageHistoryHtml() {
+function storageHistRows() {
   const evs = storageEventsFiltered();
-  const typeOpts = ['<option value="">كل الأنواع</option>'].concat(Object.keys(STORAGE_EVENT_LABELS).map((k) => `<option value="${k}"${storageHistType === k ? " selected" : ""}>${STORAGE_EVENT_LABELS[k]}</option>`)).join("");
-  const rows = evs.length ? evs.map((e) => `<tr>
+  return evs.length ? evs.map((e) => `<tr>
     <td>${fmtDateTime(e.date)}</td>
     <td>${storageEventBadge(e.type)}</td>
     <td>${esc(e.category)} ${esc(e.sub)}</td>
@@ -2005,27 +2004,62 @@ function storageHistoryHtml() {
     <td>${e.reason ? esc(e.reason) : "—"}</td>
     <td>${e.actor ? esc(e.actor) : "—"}</td>
   </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا أحداث مطابقة.</td></tr>';
+}
+function storageHistoryHtml() {
+  const typeOpts = ['<option value="">كل الأنواع</option>'].concat(Object.keys(STORAGE_EVENT_LABELS).map((k) => `<option value="${k}"${storageHistType === k ? " selected" : ""}>${STORAGE_EVENT_LABELS[k]}</option>`)).join("");
   return `
+    <div class="hist-presets">
+      <button class="btn btn-outline btn-sm" onclick="storageHistPreset('today')">اليوم</button>
+      <button class="btn btn-outline btn-sm" onclick="storageHistPreset('7')">آخر ٧ أيام</button>
+      <button class="btn btn-outline btn-sm" onclick="storageHistPreset('30')">آخر ٣٠ يوم</button>
+      <button class="btn btn-outline btn-sm" onclick="storageHistPreset('month')">هذا الشهر</button>
+      <button class="btn btn-outline btn-sm" onclick="storageHistPreset('all')">الكل</button>
+    </div>
     <div class="filter-bar">
       <label>من تاريخ <input type="date" id="sh-from" value="${esc(storageHistFrom)}" onchange="storageHistChanged()" /></label>
       <label>إلى تاريخ <input type="date" id="sh-to" value="${esc(storageHistTo)}" onchange="storageHistChanged()" /></label>
       <label>النوع <select id="sh-type" onchange="storageHistChanged()">${typeOpts}</select></label>
-      <button class="btn btn-outline btn-sm" onclick="storageHistClear()">مسح</button>
     </div>
-    <p class="info-line"><b>${evs.length.toLocaleString("ar-EG")}</b> حدث.</p>
+    <p class="info-line"><b id="storage-hist-count">${storageEventsFiltered().length.toLocaleString("ar-EG")}</b> حدث.</p>
     <div class="table-wrap"><table class="data zebra">
       <thead><tr><th>التوقيت (القاهرة)</th><th>الإجراء</th><th>الصنف</th><th>الكمية</th><th>التفاصيل</th><th>المستخدم</th></tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody id="storage-hist-body">${storageHistRows()}</tbody>
     </table></div>`;
+}
+/* تحديث جدول السجل فقط (دون إعادة رسم الصفحة) — يمنع تعليق حقل التاريخ */
+function storageHistRefresh() {
+  const root = document.querySelector(storageRoot);
+  if (!root) return;
+  const body = root.querySelector("#storage-hist-body");
+  if (body) body.innerHTML = storageHistRows();
+  const count = root.querySelector("#storage-hist-count");
+  if (count) count.textContent = storageEventsFiltered().length.toLocaleString("ar-EG");
 }
 function storageHistChanged() {
   const f = $("#sh-from"), t = $("#sh-to"), ty = $("#sh-type");
   if (f) storageHistFrom = f.value;
   if (t) storageHistTo = t.value;
   if (ty) storageHistType = ty.value;
-  renderStorage();
+  storageHistRefresh();
 }
-function storageHistClear() { storageHistFrom = ""; storageHistTo = ""; storageHistType = ""; renderStorage(); }
+/* أزرار جاهزة لاختيار المدى الزمني بسهولة بدل كتابة التاريخ يدوياً */
+function storageHistPreset(kind) {
+  const today = cairoDayKey(new Date());
+  if (kind === "today") { storageHistFrom = today; storageHistTo = today; }
+  else if (kind === "7" || kind === "30") {
+    const d = new Date(); d.setDate(d.getDate() - (kind === "7" ? 6 : 29));
+    storageHistFrom = cairoDayKey(d); storageHistTo = today;
+  } else if (kind === "month") { storageHistFrom = today.slice(0, 8) + "01"; storageHistTo = today; }
+  else { storageHistFrom = ""; storageHistTo = ""; storageHistType = ""; }
+  const root = document.querySelector(storageRoot);
+  if (root) {
+    const f = root.querySelector("#sh-from"), t = root.querySelector("#sh-to"), ty = root.querySelector("#sh-type");
+    if (f) f.value = storageHistFrom;
+    if (t) t.value = storageHistTo;
+    if (ty && kind === "all") ty.value = "";
+  }
+  storageHistRefresh();
+}
 function storageAddForm(cat, sub) {
   if (!canEditStorage()) return;
   const specs = storageSpecsOf(cat);
