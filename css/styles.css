@@ -687,3 +687,6 @@ table.bill-items input:focus { outline: 2px solid var(--primary); }
 /* تبويبات المخزن + حقول الإرجاع السريع */
 .storage-tabs { margin-bottom: 16px; }
 .temp-ret input, td.temp-ret input { width: 90px; }
+
+/* أزرار المدى الزمني الجاهزة في سجلّ المخزن */
+.hist-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
