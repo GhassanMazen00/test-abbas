@@ -20,6 +20,7 @@ const Store = (function () {
   const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment", items: r.items || [] });
   const mapCancelled = (r) => ({ id: r.id, docNo: r.doc_no || "", customerName: r.customer_name || "", items: r.items || [], total: Number(r.total) || 0, reason: r.reason || "", date: r.created_at });
   const mapStorage = (r) => ({ id: r.id, category: r.category || "", sub: r.sub || "", state: r.state || "", color: r.color || "", size: r.size || "", jarrarShape: r.jarrar_shape || "", quantity: Number(r.quantity) || 0, note: r.note || "", date: r.created_at });
+  const mapWithdrawal = (r) => ({ id: r.id, itemId: r.item_id, amount: Number(r.amount) || 0, returned: Number(r.returned) || 0, reason: r.reason || "", date: r.created_at });
 
   return {
     mode: useSupabase ? "supabase" : "local",
@@ -89,6 +90,9 @@ const Store = (function () {
       // المخزن — منفصل تماماً؛ آمن إن لم يوجد الجدول أو لم يملك المستخدم صلاحية القراءة
       DB.storage = [];
       try { DB.storage = (await this.fetchAllRows("storage_items")).map(mapStorage); } catch (e) { DB.storage = []; }
+      // السحوبات المؤقتة (إعارة) — سجلّ مستقل
+      DB.storageWithdrawals = [];
+      try { DB.storageWithdrawals = (await this.fetchAllRows("storage_withdrawals")).map(mapWithdrawal); } catch (e) { DB.storageWithdrawals = []; }
     },
 
     /* ---------- العملاء ---------- */
@@ -235,6 +239,50 @@ const Store = (function () {
       if (useSupabase) { const { error } = await sb.from("storage_items").delete().eq("id", id); if (error) throw error; }
       DB.storage = (DB.storage || []).filter((x) => x.id !== id);
       if (!useSupabase) saveDB(DB);
+    },
+    /* سحب مؤقت (إعارة): يُنقص كمية الصنف ويُنشئ سجلّ سحب بسبب */
+    async addTempWithdrawal(itemId, amount, reason) {
+      amount = Number(amount) || 0;
+      const it = (DB.storage || []).find((x) => x.id === itemId);
+      const newQty = (it ? it.quantity : 0) - amount;
+      if (!useSupabase) {
+        if (!DB.storageWithdrawals) DB.storageWithdrawals = [];
+        if (!DB.seq.withdrawal) DB.seq.withdrawal = 0;
+        DB.seq.withdrawal++;
+        const rec = { id: DB.seq.withdrawal, itemId, amount, returned: 0, reason: reason || "", date: new Date().toISOString() };
+        DB.storageWithdrawals.push(rec);
+        if (it) it.quantity = newQty;
+        saveDB(DB); return rec;
+      }
+      const { data, error } = await sb.from("storage_withdrawals").insert({ item_id: itemId, amount, returned: 0, reason: reason || "" }).select().single();
+      if (error) throw error;
+      const { error: e2 } = await sb.from("storage_items").update({ quantity: newQty }).eq("id", itemId);
+      if (e2) throw e2;
+      const rec = mapWithdrawal(data);
+      if (!DB.storageWithdrawals) DB.storageWithdrawals = [];
+      DB.storageWithdrawals.push(rec);
+      if (it) it.quantity = newQty;
+      return rec;
+    },
+    /* إرجاع جزء أو كل سحب مؤقت إلى المخزن */
+    async returnTempWithdrawal(wId, amount) {
+      amount = Number(amount) || 0;
+      const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+      if (!w) return;
+      const it = (DB.storage || []).find((x) => x.id === w.itemId);
+      const newReturned = w.returned + amount;
+      const newQty = (it ? it.quantity : 0) + amount;
+      if (!useSupabase) {
+        w.returned = newReturned;
+        if (it) it.quantity = newQty;
+        saveDB(DB); return;
+      }
+      const { error } = await sb.from("storage_withdrawals").update({ returned: newReturned }).eq("id", wId);
+      if (error) throw error;
+      const { error: e2 } = await sb.from("storage_items").update({ quantity: newQty }).eq("id", w.itemId);
+      if (e2) throw e2;
+      w.returned = newReturned;
+      if (it) it.quantity = newQty;
     },
 
     /* ---------- طلبات الدخول (موافقة المدير) ---------- */

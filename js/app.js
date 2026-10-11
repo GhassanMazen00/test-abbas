@@ -1817,16 +1817,23 @@ function storageCatFilteredRows(cat) {
   if (q) rows = rows.filter((it) => storageMatch(it, q));
   return rows.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
+function storageWithdrawalsOf(itemId) { return (DB.storageWithdrawals || []).filter((w) => w.itemId === itemId); }
+function storageActiveWithdrawals(itemId) { return storageWithdrawalsOf(itemId).filter((w) => (w.amount - w.returned) > 0); }
+function storageOutstanding(itemId) { return storageActiveWithdrawals(itemId).reduce((s, w) => s + (w.amount - w.returned), 0); }
 function storageCatRow(it) {
+  const out = storageOutstanding(it.id);
+  const active = storageActiveWithdrawals(it.id);
   return `<tr>
     <td class="num">${esc(it.sub) || "—"}</td>
     <td>${storageSpecCells(it)}</td>
-    <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b></td>
+    <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${out.toLocaleString("ar-EG")}</div>` : ""}</td>
     <td>${it.note ? esc(it.note) : "—"}</td>
     <td>${fmtDate(it.date)}</td>
     ${canEditStorage() ? `<td class="row-actions">
       <button class="btn btn-success btn-sm" onclick="storageQtyForm(${it.id}, 'add')">+ كمية</button>
       <button class="btn btn-warning btn-sm" onclick="storageQtyForm(${it.id}, 'withdraw')">− سحب</button>
+      <button class="btn btn-transfer btn-sm" onclick="storageTempForm(${it.id})">سحب مؤقت</button>
+      ${active.length ? `<button class="btn btn-outline btn-sm" onclick="storageTempManage(${it.id})">إرجاع (${active.length.toLocaleString("ar-EG")})</button>` : ""}
     </td>` : ""}
   </tr>`;
 }
@@ -1932,6 +1939,78 @@ async function storageApplyQty(id, mode) {
     await Store.updateStorageItem(id, { quantity: newQty });
     closeModal(); toast(mode === "add" ? "تمت إضافة الكمية" : "تم سحب الكمية"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر تحديث الكمية"), true); }
+}
+/* ---------- السحب المؤقت (إعارة) + الإرجاع ---------- */
+function storageTempForm(id) {
+  if (!canEditStorage()) return;
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  openModal(`سحب مؤقت — ${it.category} ${it.sub}`, `
+    <p class="info-line">المتوفّر حالياً: <b>${Number(it.quantity).toLocaleString("ar-EG")}</b></p>
+    <div class="field"><label>الكمية المسحوبة مؤقتاً</label><input type="number" id="st-temp-qty" min="1" placeholder="0" /></div>
+    <div class="field"><label>سبب السحب المؤقت (إلزامي)</label><textarea id="st-temp-reason" placeholder="مثال: إعارة لورشة / معاينة عميل..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-transfer" onclick="storageSaveTemp(${id})">سحب مؤقت</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+}
+async function storageSaveTemp(id) {
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const amt = Math.abs(Number($("#st-temp-qty") ? $("#st-temp-qty").value : 0) || 0);
+  const reason = ($("#st-temp-reason") ? $("#st-temp-reason").value : "").trim();
+  if (!amt) { toast("أدخل كمية صحيحة", true); return; }
+  if (amt > it.quantity) { toast("الكمية أكبر من المتوفّر (" + it.quantity.toLocaleString("ar-EG") + ")", true); return; }
+  if (!reason) { toast("يرجى كتابة سبب السحب المؤقت", true); return; }
+  try {
+    await Store.addTempWithdrawal(id, amt, reason);
+    closeModal(); toast("تم السحب المؤقت"); renderStorage();
+  } catch (e) { toast(errMsg(e, "تعذّر السحب المؤقت"), true); }
+}
+function storageTempManage(id) {
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const active = storageActiveWithdrawals(id).sort((a, b) => new Date(a.date) - new Date(b.date));
+  const rows = active.length ? active.map((w) => {
+    const outstanding = w.amount - w.returned;
+    return `<div class="temp-row">
+      <div class="temp-info">
+        <div><b>خارج الآن: ${outstanding.toLocaleString("ar-EG")}</b> <span class="qty-sub">(مسحوب ${w.amount.toLocaleString("ar-EG")} — مُرجع ${w.returned.toLocaleString("ar-EG")})</span></div>
+        <div class="qty-sub">السبب: ${w.reason ? esc(w.reason) : "—"} • ${fmtDate(w.date)}</div>
+      </div>
+      ${canEditStorage() ? `<div class="temp-ret">
+        <input type="number" id="ret-${w.id}" min="1" max="${outstanding}" placeholder="كمية الإرجاع" />
+        <button class="btn btn-success btn-sm" onclick="storageReturn(${w.id})">إرجاع</button>
+        <button class="btn btn-outline btn-sm" onclick="storageReturnAll(${w.id})">الكل</button>
+      </div>` : ""}
+    </div>`;
+  }).join("") : '<p class="empty-msg">لا سحوبات مؤقتة قائمة.</p>';
+  openModal(`السحوبات المؤقتة — ${it.category} ${it.sub}`, `
+    <p class="info-line">إجمالي الخارج مؤقتاً: <b>${storageOutstanding(id).toLocaleString("ar-EG")}</b></p>
+    ${rows}
+    <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">إغلاق</button></div>`);
+}
+async function storageReturn(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  const outstanding = w.amount - w.returned;
+  const amt = Math.abs(Number($("#ret-" + wId) ? $("#ret-" + wId).value : 0) || 0);
+  if (!amt) { toast("أدخل كمية الإرجاع", true); return; }
+  if (amt > outstanding) { toast("الكمية أكبر من المتبقّي خارج المخزن (" + outstanding.toLocaleString("ar-EG") + ")", true); return; }
+  try {
+    await Store.returnTempWithdrawal(wId, amt);
+    toast("تم إرجاع الكمية"); renderStorage(); storageTempManage(w.itemId);
+  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
+}
+async function storageReturnAll(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  const outstanding = w.amount - w.returned;
+  if (outstanding <= 0) return;
+  try {
+    await Store.returnTempWithdrawal(wId, outstanding);
+    toast("تم إرجاع كامل الكمية"); renderStorage(); storageTempManage(w.itemId);
+  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
 }
 
 /* ---------- تبويب العملاء ---------- */

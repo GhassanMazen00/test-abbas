@@ -46,14 +46,17 @@ function initDB() {
       payments: [],
       cancelled: [],
       storage: [],
-      seq: { bill: 0, payment: 0, cancelled: 0, storage: 0 }
+      storageWithdrawals: [],
+      seq: { bill: 0, payment: 0, cancelled: 0, storage: 0, withdrawal: 0 }
     };
     saveDB(db);
   }
   if (!db.cancelled) db.cancelled = [];
   if (!db.storage) db.storage = [];
+  if (!db.storageWithdrawals) db.storageWithdrawals = [];
   if (db.seq && db.seq.cancelled == null) db.seq.cancelled = 0;
   if (db.seq && db.seq.storage == null) db.seq.storage = 0;
+  if (db.seq && db.seq.withdrawal == null) db.seq.withdrawal = 0;
   return db;
 }
 
