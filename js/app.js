@@ -1792,7 +1792,7 @@ const STORAGE_SCHEMA = {
   }
 };
 let storageRoot = "#storage-content";
-let storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
+let storageGroup = null, storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
 let storageTab = "store"; // store | temps | history
 let storageHistFrom = "", storageHistTo = "", storageHistType = "", storageHistItem = "";
 const STORAGE_EVENT_LABELS = {
@@ -1863,26 +1863,19 @@ function storageHomeResultsHtml() {
     </table></div>`;
 }
 function storageHomeHtml() {
-  const groups = STORAGE_HOME_GROUPS.map((g) => {
-    const inner = g.types.length
-      ? g.types.map((t) => {
-          const count = storageItems().filter((it) => it.category === t).length;
-          return `<button class="storage-cat-btn" onclick="storageOpenCat('${t}')">
-            <span class="storage-cat-name">${esc(t)}</span>
-            <span class="storage-cat-sub">${count.toLocaleString("ar-EG")} صنف</span>
-          </button>`;
-        }).join("")
-      : `<button class="storage-cat-btn soon" disabled><span class="storage-cat-name">${esc(g.name)}</span><span class="storage-cat-sub">قريباً</span></button>`;
-    return `<div class="storage-group">
-      <div class="storage-group-head">${esc(g.name)}</div>
-      <div class="storage-cats">${inner}</div>
-    </div>`;
+  const buttons = STORAGE_HOME_GROUPS.map((g) => {
+    const ready = g.types.length > 0;
+    const count = g.types.reduce((s, t) => s + storageItems().filter((it) => it.category === t).length, 0);
+    return `<button class="storage-cat-btn${ready ? "" : " soon"}"${ready ? ` onclick="storageOpenGroup('${g.name}')"` : " disabled"}>
+      <span class="storage-cat-name">${esc(g.name)}</span>
+      <span class="storage-cat-sub">${ready ? count.toLocaleString("ar-EG") + " صنف" : "قريباً"}</span>
+    </button>`;
   }).join("");
   return `
     <div class="section-head"><h2 class="page-title" style="margin:0">المخزن</h2></div>
     <div class="search-bar"><input type="text" id="storage-home-search" placeholder="ابحث بكلمات مرنة: الصنف، اللون، رقم اللون، المقاس، الملاحظة..." value="${esc(storageHomeQuery)}" /></div>
     <div id="storage-home-results">${storageHomeResultsHtml()}</div>
-    ${groups}`;
+    <div class="storage-cats">${buttons}</div>`;
 }
 function storageCatFilteredRows(cat) {
   let rows = storageItems().filter((it) => it.category === cat);
@@ -1923,7 +1916,16 @@ function storageCatInfoHtml(cat) {
   const totalQty = rows.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
   return `<b>${rows.length.toLocaleString("ar-EG")}</b> صنف — إجمالي الكمية <b>${totalQty.toLocaleString("ar-EG")}</b>${storageSubFilter ? ` (مقاس ${esc(storageSubFilter)})` : ""}.`;
 }
+function storageGroupOf(type) {
+  const g = STORAGE_HOME_GROUPS.find((x) => x.types.indexOf(type) !== -1);
+  return g ? g.name : type;
+}
 function storageCategoryHtml(cat) {
+  const group = STORAGE_HOME_GROUPS.find((g) => g.name === storageGroup) || STORAGE_HOME_GROUPS.find((g) => g.types.indexOf(cat) !== -1);
+  const types = group ? group.types : [cat];
+  const typeChips = types.length > 1
+    ? `<div class="chips-row type-chips">${types.map((t) => `<button class="chip${storageCat === t ? " active" : ""}" onclick="storageSetType('${t}')">${esc(t)}</button>`).join("")}</div>`
+    : "";
   const subs = storageSubsOf(cat);
   const hasSubs = subs.length > 0;
   const subBtns = hasSubs ? [`<button class="chip${storageSubFilter === "" ? " active" : ""}" onclick="storageSetSub('')">الكل</button>`]
@@ -1935,8 +1937,9 @@ function storageCategoryHtml(cat) {
     : "";
   return `
     <button class="btn btn-outline btn-back" onclick="storageOpenHome()">↩ العودة للمخزن</button>
-    <div class="section-head"><h2 class="page-title" style="margin:0">${esc(cat)}</h2></div>
-    ${addBtns ? `<div class="btn-group" style="margin-bottom:12px">${addBtns}</div>` : ""}
+    <div class="section-head"><h2 class="page-title" style="margin:0">${esc(group ? group.name : cat)}</h2></div>
+    ${typeChips}
+    ${addBtns ? `<div class="btn-group" style="margin:4px 0 12px">${addBtns}</div>` : ""}
     <div class="search-bar"><input type="text" id="storage-cat-search" placeholder="ابحث داخل ${esc(cat)} (لون، مقاس، ملاحظة...)" value="${esc(storageCatQuery)}" /></div>
     ${hasSubs ? `<div class="chips-row">${subBtns}</div>` : ""}
     <p class="info-line" id="storage-cat-info">${storageCatInfoHtml(cat)}</p>
@@ -1974,15 +1977,21 @@ function renderStorage() {
     const info = el.querySelector("#storage-cat-info"); if (info) info.innerHTML = storageCatInfoHtml(storageCat);
   };
 }
-function storageSwitchTab(t) { storageTab = t; if (t !== "store") storageCat = null; renderStorage(); }
+function storageSwitchTab(t) { storageTab = t; renderStorage(); }
 function storageOpenHome(root) {
   if (root) storageRoot = root;
-  storageTab = "store"; storageCat = null; storageSubFilter = ""; storageHomeQuery = "";
+  storageTab = "store"; storageGroup = null; storageCat = null; storageSubFilter = ""; storageHomeQuery = "";
   renderStorage();
 }
-function storageOpenCat(cat) {
-  if (!STORAGE_SCHEMA[cat]) { toast("تصنيف «" + cat + "» قيد الإعداد — قريباً"); return; }
-  storageTab = "store"; storageCat = cat; storageCatQuery = ""; storageSubFilter = "";
+function storageOpenGroup(name) {
+  const g = STORAGE_HOME_GROUPS.find((x) => x.name === name);
+  if (!g || !g.types.length) { toast("«" + name + "» قيد الإعداد — قريباً"); return; }
+  storageTab = "store"; storageGroup = name; storageCat = g.types[0]; storageCatQuery = ""; storageSubFilter = "";
+  renderStorage();
+}
+function storageSetType(type) {
+  if (!STORAGE_SCHEMA[type]) return;
+  storageCat = type; storageCatQuery = ""; storageSubFilter = "";
   renderStorage();
 }
 function storageSetSub(sub) { storageSubFilter = sub; renderStorage(); }
@@ -2048,14 +2057,15 @@ function storageEventsFiltered() {
   if (storageHistItem) evs = evs.filter((e) => (e.category + "|" + e.sub) === storageHistItem);
   return evs.sort((a, b) => new Date(b.date) - new Date(a.date));
 }
-/* قائمة بأسماء الأصناف (التصنيف + المقاس) الموجودة في السجل — للفلترة */
+/* قائمة بكل أسماء الأصناف (التصنيف + المقاس) من المخطط — للفلترة في السجل */
 function storageEventItemTypes() {
-  const m = new Map();
-  (DB.storageEvents || []).forEach((e) => {
-    const k = e.category + "|" + e.sub;
-    if (!m.has(k)) m.set(k, (e.category + (e.sub ? " " + e.sub : "")).trim());
+  const out = [];
+  Object.keys(STORAGE_SCHEMA).forEach((type) => {
+    const subs = storageSubsOf(type);
+    if (subs.length) subs.forEach((s) => out.push({ k: type + "|" + s, label: type + " " + s }));
+    else out.push({ k: type + "|", label: type });
   });
-  return [...m.entries()].map(([k, label]) => ({ k, label })).sort((a, b) => a.label.localeCompare(b.label, "ar"));
+  return out;
 }
 function storageHistRows() {
   const evs = storageEventsFiltered();
