@@ -242,6 +242,28 @@ const Store = (function () {
     async deleteStorageItem(id) {
       if (useSupabase) { const { error } = await sb.from("storage_items").delete().eq("id", id); if (error) throw error; }
       DB.storage = (DB.storage || []).filter((x) => x.id !== id);
+      DB.storageWithdrawals = (DB.storageWithdrawals || []).filter((w) => w.itemId !== id);
+      if (!useSupabase) saveDB(DB);
+    },
+    /* حذف سحب مؤقت (للمدير): يُعيد الكمية المتبقّية خارج المخزن إلى الصنف ثم يحذف السجلّ */
+    async deleteStorageWithdrawal(id) {
+      const w = (DB.storageWithdrawals || []).find((x) => x.id === id);
+      if (!w) return;
+      const it = (DB.storage || []).find((x) => x.id === w.itemId);
+      const outstanding = w.amount - w.returned;
+      const newQty = (it ? it.quantity : 0) + outstanding;
+      if (useSupabase) {
+        if (it && outstanding) { const { error: e1 } = await sb.from("storage_items").update({ quantity: newQty }).eq("id", it.id); if (e1) throw e1; }
+        const { error } = await sb.from("storage_withdrawals").delete().eq("id", id); if (error) throw error;
+      }
+      if (it && outstanding) it.quantity = newQty;
+      DB.storageWithdrawals = (DB.storageWithdrawals || []).filter((x) => x.id !== id);
+      if (!useSupabase) saveDB(DB);
+    },
+    /* حذف حدث من سجلّ المخزن (للمدير) */
+    async deleteStorageEvent(id) {
+      if (useSupabase) { const { error } = await sb.from("storage_events").delete().eq("id", id); if (error) throw error; }
+      DB.storageEvents = (DB.storageEvents || []).filter((x) => x.id !== id);
       if (!useSupabase) saveDB(DB);
     },
     /* سحب مؤقت (إعارة): يُنقص كمية الصنف ويُنشئ سجلّ سحب بسبب */

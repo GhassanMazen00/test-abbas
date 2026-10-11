@@ -1772,11 +1772,12 @@ const STORAGE_EVENT_LABELS = {
   qty_added: "إضافة كمية",
   qty_withdrawn: "سحب كمية",
   temp_withdrawn: "سحب مؤقت",
-  returned: "إرجاع"
+  returned: "إرجاع",
+  item_deleted: "حذف صنف"
 };
 const STORAGE_EVENT_BADGE = {
   item_added: "badge-success", qty_added: "badge-success", qty_withdrawn: "badge-warning",
-  temp_withdrawn: "badge-transfer", returned: "badge-success"
+  temp_withdrawn: "badge-transfer", returned: "badge-success", item_deleted: "badge-danger"
 };
 function storageEventBadge(type) { return `<span class="badge ${STORAGE_EVENT_BADGE[type] || ""}">${STORAGE_EVENT_LABELS[type] || esc(type)}</span>`; }
 /* تسجيل حدث في سجلّ المخزن (بتوقيت القاهرة عند العرض) */
@@ -1784,6 +1785,8 @@ function logStore(itemId, cat, sub, type, amount, reason) {
   return Store.logStorageEvent({ itemId: itemId, category: cat, sub: sub, type: type, amount: amount, reason: reason, actor: (currentUser ? currentUser.username : "") });
 }
 function canEditStorage(u) { u = u || currentUser; return !!u && (isStorageUser(u) || u.role === "manager"); }
+/* الحذف للمدير (loai) فقط — لا storage1 ولا المشرف */
+function canDeleteStorage(u) { u = u || currentUser; return !!u && u.role === "manager"; }
 function storageItems() { return DB.storage || []; }
 function storageSpecsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].specs) || []; }
 function storageSubsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].subs) || []; }
@@ -1864,6 +1867,7 @@ function storageCatRow(it) {
       <button class="btn btn-warning btn-sm" onclick="storageQtyForm(${it.id}, 'withdraw')">− سحب</button>
       <button class="btn btn-transfer btn-sm" onclick="storageTempForm(${it.id})">سحب مؤقت</button>
       ${active.length ? `<button class="btn btn-outline btn-sm" onclick="storageTempManage(${it.id})">إرجاع (${active.length.toLocaleString("ar-EG")})</button>` : ""}
+      ${canDeleteStorage() ? `<button class="btn btn-danger btn-sm" onclick="storageDeleteItem(${it.id})">حذف</button>` : ""}
     </td>` : ""}
   </tr>`;
 }
@@ -1954,6 +1958,7 @@ function storageTempsTabHtml() {
         <input type="number" id="gret-${w.id}" min="1" max="${outstanding}" placeholder="كمية" />
         <button class="btn btn-success btn-sm" onclick="storageReturnGlobal(${w.id})">إرجاع</button>
         <button class="btn btn-outline btn-sm" onclick="storageReturnAllGlobal(${w.id})">الكل</button>
+        ${canDeleteStorage() ? `<button class="btn btn-danger btn-sm" onclick="storageDeleteWithdrawal(${w.id})">حذف</button>` : ""}
       </td>` : ""}
     </tr>`;
   }).join("");
@@ -2003,7 +2008,8 @@ function storageHistRows() {
     <td class="num">${e.amount ? e.amount.toLocaleString("ar-EG") : "—"}</td>
     <td>${e.reason ? esc(e.reason) : "—"}</td>
     <td>${e.actor ? esc(e.actor) : "—"}</td>
-  </tr>`).join("") : '<tr><td colspan="6" class="empty-msg">لا أحداث مطابقة.</td></tr>';
+    ${canDeleteStorage() ? `<td class="row-actions"><button class="btn btn-danger btn-sm" onclick="storageDeleteEvent(${e.id})">حذف</button></td>` : ""}
+  </tr>`).join("") : `<tr><td colspan="${canDeleteStorage() ? 7 : 6}" class="empty-msg">لا أحداث مطابقة.</td></tr>`;
 }
 function storageHistoryHtml() {
   const typeOpts = ['<option value="">كل الأنواع</option>'].concat(Object.keys(STORAGE_EVENT_LABELS).map((k) => `<option value="${k}"${storageHistType === k ? " selected" : ""}>${STORAGE_EVENT_LABELS[k]}</option>`)).join("");
@@ -2022,7 +2028,7 @@ function storageHistoryHtml() {
     </div>
     <p class="info-line"><b id="storage-hist-count">${storageEventsFiltered().length.toLocaleString("ar-EG")}</b> حدث.</p>
     <div class="table-wrap"><table class="data zebra">
-      <thead><tr><th>التوقيت (القاهرة)</th><th>الإجراء</th><th>الصنف</th><th>الكمية</th><th>التفاصيل</th><th>المستخدم</th></tr></thead>
+      <thead><tr><th>التوقيت (القاهرة)</th><th>الإجراء</th><th>الصنف</th><th>الكمية</th><th>التفاصيل</th><th>المستخدم</th>${canDeleteStorage() ? "<th></th>" : ""}</tr></thead>
       <tbody id="storage-hist-body">${storageHistRows()}</tbody>
     </table></div>`;
 }
@@ -2202,6 +2208,37 @@ async function storageReturnAll(wId) {
   if (!w) return;
   const itemId = w.itemId;
   if (await storageDoReturn(wId, w.amount - w.returned)) { renderStorage(); storageTempManage(itemId); }
+}
+/* ---------- الحذف (للمدير loai فقط) ---------- */
+function storageDeleteItem(id) {
+  if (!canDeleteStorage()) return;
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  confirmDialog("حذف صنف", `سيتم حذف «${it.category} ${it.sub}» نهائياً مع كل سحوباته المؤقتة. متأكد؟`, async () => {
+    try {
+      await Store.deleteStorageItem(id);
+      await logStore(null, it.category, it.sub, "item_deleted", it.quantity, "");
+      toast("تم حذف الصنف"); renderStorage();
+    } catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  });
+}
+function storageDeleteWithdrawal(id) {
+  if (!canDeleteStorage()) return;
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === id);
+  if (!w) return;
+  const outstanding = w.amount - w.returned;
+  const msg = outstanding > 0 ? `حذف هذا السحب المؤقت؟ سيُعاد ${outstanding.toLocaleString("ar-EG")} إلى المخزن.` : "حذف سجلّ هذا السحب المؤقت نهائياً؟";
+  confirmDialog("حذف سحب مؤقت", msg, async () => {
+    try { await Store.deleteStorageWithdrawal(id); toast("تم الحذف"); renderStorage(); }
+    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  });
+}
+function storageDeleteEvent(id) {
+  if (!canDeleteStorage()) return;
+  confirmDialog("حذف من السجل", "حذف هذا الحدث من السجل نهائياً؟", async () => {
+    try { await Store.deleteStorageEvent(id); storageHistRefresh(); }
+    catch (e) { toast(errMsg(e, "تعذّر الحذف"), true); }
+  });
 }
 
 /* ---------- تبويب العملاء ---------- */
