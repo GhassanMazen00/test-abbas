@@ -310,7 +310,19 @@ const Store = (function () {
       w.returned = newReturned;
       if (it) it.quantity = newQty;
     },
-    /* تسجيل حدث في سجلّ المخزن (ثانوي — لا يُفشل العملية الأساسية إن غاب الجدول) */
+    /* تحديد كمية مُرجعة من سحب مؤقت دون إعادتها للصنف الأصلي (عند الإرجاع لصنف جديد/موجود) */
+    async markWithdrawalReturned(wId, amount) {
+      amount = Number(amount) || 0;
+      const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+      if (!w) return;
+      const newReturned = w.returned + amount;
+      if (useSupabase) {
+        const { error } = await sb.from("storage_withdrawals").update({ returned: newReturned }).eq("id", wId);
+        if (error) throw error;
+      }
+      w.returned = newReturned;
+      if (!useSupabase) saveDB(DB);
+    },
     async logStorageEvent(ev) {
       const row = { item_id: ev.itemId || null, category: ev.category || "", sub: ev.sub || "", type: ev.type || "", amount: Number(ev.amount) || 0, reason: ev.reason || "", specs: ev.specs || "", actor: ev.actor || "" };
       if (!useSupabase) {
