@@ -2013,10 +2013,8 @@ function storageTempsTabHtml() {
       <td class="num">${w.returned.toLocaleString("ar-EG")}</td>
       <td>${w.reason ? esc(w.reason) : "—"}</td>
       <td>${fmtDateTime(w.date)}</td>
-      ${canEditStorage() ? `<td class="row-actions temp-ret">
-        <input type="number" id="gret-${w.id}" min="1" max="${outstanding}" placeholder="كمية" />
-        <button class="btn btn-success btn-sm" onclick="storageReturnGlobal(${w.id})">إرجاع</button>
-        <button class="btn btn-outline btn-sm" onclick="storageReturnAllGlobal(${w.id})">الكل</button>
+      ${canEditStorage() ? `<td class="row-actions">
+        <button class="btn btn-success btn-sm" onclick="storageReturnForm(${w.id})">إرجاع</button>
         ${canDeleteStorage() ? `<button class="btn btn-danger btn-sm" onclick="storageDeleteWithdrawal(${w.id})">حذف</button>` : ""}
       </td>` : ""}
     </tr>`;
@@ -2040,14 +2038,87 @@ async function storageDoReturn(wId, amt) {
     toast("تم إرجاع الكمية"); return true;
   } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); return false; }
 }
-async function storageReturnGlobal(wId) {
-  const amt = Math.abs(Number($("#gret-" + wId) ? $("#gret-" + wId).value : 0) || 0);
-  if (await storageDoReturn(wId, amt)) renderStorage();
-}
-async function storageReturnAllGlobal(wId) {
+/* ---------- نموذج الإرجاع بثلاث وجهات: نفس الصنف / صنف جديد / صنف موجود ---------- */
+function storageReturnForm(wId) {
+  if (!canEditStorage()) return;
   const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
   if (!w) return;
-  if (await storageDoReturn(wId, w.amount - w.returned)) renderStorage();
+  const it = storageItems().find((x) => x.id === w.itemId);
+  const cat = it ? it.category : (w.category || "");
+  const outstanding = w.amount - w.returned;
+  openModal(`إرجاع — ${it ? storageItemFullLabel(it) : esc(cat)}`, `
+    <p class="info-line">خارج الآن: <b>${outstanding.toLocaleString("ar-EG")}</b>${w.reason ? " • السبب: " + esc(w.reason) : ""}</p>
+    <div class="field"><label>الكمية المُرجعة</label><input type="number" id="ret-amt" min="1" max="${outstanding}" value="${outstanding}" /></div>
+    <div class="field"><label>وجهة الإرجاع</label>
+      <select id="ret-dest" onchange="storageReturnDestChanged(${wId})">
+        <option value="same">إرجاع لنفس الصنف (بدون تغيير)</option>
+        <option value="new">صنف جديد (تغيّر الطول/اللون)</option>
+        <option value="existing">صنف موجود (${esc(cat)})</option>
+      </select>
+    </div>
+    <div id="ret-dest-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="storageReturnConfirm(${wId})">تأكيد الإرجاع</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+  storageReturnDestChanged(wId);
+}
+function storageReturnDestChanged(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  const cat = (storageItems().find((x) => x.id === w.itemId) || {}).category || w.category || "";
+  const dest = $("#ret-dest") ? $("#ret-dest").value : "same";
+  const body = $("#ret-dest-body");
+  if (!body) return;
+  if (dest === "new") {
+    const subs = storageSubsOf(cat);
+    const subSel = subs.length ? `<div class="field"><label>المقاس (mm)</label><select id="ret-new-sub">${subs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></div>` : "";
+    body.innerHTML = `<div class="form-grid">${subSel}${storageSpecFieldsHtml(cat)}<div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div></div>`;
+  } else if (dest === "existing") {
+    const items = storageItems().filter((x) => x.category === cat && x.id !== w.itemId);
+    body.innerHTML = items.length
+      ? `<div class="field"><label>اختر الصنف (${esc(cat)})</label><select id="ret-existing">${items.map((x) => `<option value="${x.id}">${esc(storageItemFullLabel(x))}</option>`).join("")}</select></div>`
+      : `<p class="info-line">لا يوجد صنف آخر من «${esc(cat)}» — اختر «صنف جديد».</p>`;
+  } else {
+    body.innerHTML = "";
+  }
+}
+async function storageReturnConfirm(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  const it = storageItems().find((x) => x.id === w.itemId);
+  const cat = it ? it.category : (w.category || "");
+  const outstanding = w.amount - w.returned;
+  const amt = Math.abs(Number($("#ret-amt") ? $("#ret-amt").value : 0) || 0);
+  if (!amt) { toast("أدخل كمية الإرجاع", true); return; }
+  if (amt > outstanding) { toast("الكمية أكبر من المتبقّي خارج المخزن (" + outstanding.toLocaleString("ar-EG") + ")", true); return; }
+  const dest = $("#ret-dest") ? $("#ret-dest").value : "same";
+  const origSpecs = it ? storageSpecCells(it) : "";
+  try {
+    if (dest === "same") {
+      await Store.returnTempWithdrawal(wId, amt);
+      await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, w.reason, origSpecs);
+    } else if (dest === "new") {
+      const subs = storageSubsOf(cat);
+      const sub = subs.length ? ($("#ret-new-sub") ? $("#ret-new-sub").value : "") : "";
+      const obj = storageCollectSpecs(cat);
+      if (obj === null) return;
+      obj.category = cat; obj.sub = sub; obj.quantity = amt; obj.note = ($("#st-note") ? $("#st-note").value : "").trim();
+      const rec = await Store.addStorageItem(obj);
+      await Store.markWithdrawalReturned(wId, amt);
+      await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, "تغيير — إلى صنف جديد", origSpecs);
+      await logStore(rec ? rec.id : null, cat, sub, "item_added", amt, obj.note, storageSpecCells(rec || obj));
+    } else {
+      const tid = Number($("#ret-existing") ? $("#ret-existing").value : 0) || 0;
+      const target = storageItems().find((x) => x.id === tid);
+      if (!target) { toast("اختر صنفاً موجوداً", true); return; }
+      await Store.updateStorageItem(tid, { quantity: target.quantity + amt });
+      await Store.markWithdrawalReturned(wId, amt);
+      await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, "تغيير — إلى صنف موجود", origSpecs);
+      await logStore(tid, target.category, target.sub, "qty_added", amt, "إرجاع من سحب مؤقت", storageSpecCells(target));
+    }
+    closeModal(); toast("تم الإرجاع"); renderStorage();
+  } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
 }
 /* ---------- تبويب «السجل»: كل أحداث المخزن مع فلتر تاريخ وتوقيت القاهرة ---------- */
 function storageEventsFiltered() {
@@ -2140,11 +2211,11 @@ function storageHistPreset(kind) {
   }
   storageHistRefresh();
 }
-function storageAddForm(cat, sub) {
-  if (!canEditStorage()) return;
+/* بناء حقول المواصفات لصنف (يُستخدم في الإضافة وفي الإرجاع لصنف جديد) */
+function storageSpecFieldsHtml(cat) {
   const specs = storageSpecsOf(cat);
   const controllers = new Set(specs.filter((s) => s.showIf).map((s) => s.showIf.key));
-  const fields = specs.map((sp) => {
+  return specs.map((sp) => {
     const hidden = sp.showIf ? ' style="display:none"' : "";
     const lbl = esc(sp.label) + (sp.opt ? " (اختياري)" : "");
     if (sp.type === "select") {
@@ -2156,9 +2227,24 @@ function storageAddForm(cat, sub) {
     const minAttr = sp.type === "number" ? ' min="0"' : "";
     return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><input type="${inType}"${minAttr} id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
   }).join("");
+}
+/* قراءة المواصفات من النموذج والتحقّق منها — يرجع كائن القيم أو null عند خطأ */
+function storageCollectSpecs(cat) {
+  const specs = storageSpecsOf(cat);
+  const obj = {};
+  specs.forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
+  for (const sp of specs) {
+    const met = !sp.showIf || obj[sp.showIf.key] === sp.showIf.value;
+    if (sp.showIf && !met) { obj[sp.key] = ""; continue; }
+    if (!sp.opt && !obj[sp.key]) { toast("الحقل «" + sp.label + "» إلزامي", true); return null; }
+  }
+  return obj;
+}
+function storageAddForm(cat, sub) {
+  if (!canEditStorage()) return;
   openModal(`${sub ? cat + " " + sub : cat} — صنف جديد`, `
     <div class="form-grid">
-      ${fields}
+      ${storageSpecFieldsHtml(cat)}
       <div class="field"><label>الكمية</label><input type="number" id="st-qty" min="0" placeholder="0" /></div>
       <div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div>
     </div>
@@ -2181,16 +2267,10 @@ function storageFormCond(cat) {
 }
 async function storageSaveNew(cat, sub) {
   const qtyRaw = $("#st-qty") ? $("#st-qty").value.trim() : "";
-  const obj = { category: cat, sub: sub, quantity: Number(qtyRaw) || 0, note: ($("#st-note") ? $("#st-note").value : "").trim() };
-  const specs = storageSpecsOf(cat);
-  specs.forEach((sp) => { const el = $("#st-" + sp.key); obj[sp.key] = (el ? el.value : "").trim(); });
-  // التحقّق: كل الحقول إلزامية إلا ما عليه opt (رقم اللون والملاحظة)، والشرطية تلزم عند تحقّق شرطها فقط
-  for (const sp of specs) {
-    const met = !sp.showIf || obj[sp.showIf.key] === sp.showIf.value;
-    if (sp.showIf && !met) { obj[sp.key] = ""; continue; }
-    if (!sp.opt && !obj[sp.key]) { toast("الحقل «" + sp.label + "» إلزامي", true); return; }
-  }
+  const obj = storageCollectSpecs(cat);
+  if (obj === null) return;
   if (qtyRaw === "") { toast("الكمية إلزامية", true); return; }
+  obj.category = cat; obj.sub = sub; obj.quantity = Number(qtyRaw) || 0; obj.note = ($("#st-note") ? $("#st-note").value : "").trim();
   try {
     const rec = await Store.addStorageItem(obj);
     await logStore(rec ? rec.id : null, cat, sub, "item_added", obj.quantity, obj.note, storageSpecCells(rec || obj));
@@ -2263,9 +2343,7 @@ function storageTempManage(id) {
         <div class="qty-sub">السبب: ${w.reason ? esc(w.reason) : "—"} • ${fmtDateTime(w.date)}</div>
       </div>
       ${canEditStorage() ? `<div class="temp-ret">
-        <input type="number" id="ret-${w.id}" min="1" max="${outstanding}" placeholder="كمية الإرجاع" />
-        <button class="btn btn-success btn-sm" onclick="storageReturn(${w.id})">إرجاع</button>
-        <button class="btn btn-outline btn-sm" onclick="storageReturnAll(${w.id})">الكل</button>
+        <button class="btn btn-success btn-sm" onclick="storageReturnForm(${w.id})">إرجاع</button>
       </div>` : ""}
     </div>`;
   }).join("") : '<p class="empty-msg">لا سحوبات مؤقتة قائمة.</p>';
@@ -2275,17 +2353,12 @@ function storageTempManage(id) {
     <div class="modal-actions"><button class="btn btn-outline" onclick="closeModal()">إغلاق</button></div>`);
 }
 async function storageReturn(wId) {
-  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
-  if (!w) return;
-  const itemId = w.itemId;
-  const amt = Math.abs(Number($("#ret-" + wId) ? $("#ret-" + wId).value : 0) || 0);
-  if (await storageDoReturn(wId, amt)) { renderStorage(); storageTempManage(itemId); }
+  if (!wId) return;
+  storageReturnForm(wId);
 }
 async function storageReturnAll(wId) {
-  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
-  if (!w) return;
-  const itemId = w.itemId;
-  if (await storageDoReturn(wId, w.amount - w.returned)) { renderStorage(); storageTempManage(itemId); }
+  if (!wId) return;
+  storageReturnForm(wId);
 }
 /* ---------- الحذف (للمدير loai فقط) ---------- */
 function storageDeleteItem(id) {
