@@ -1550,6 +1550,50 @@ function downloadBackup() {
     toast("تم تنزيل النسخة الاحتياطية (" + counts + ")");
   } catch (e) { toast(errMsg(e, "تعذّر تنزيل النسخة الاحتياطية"), true); }
 }
+function backupStamp() {
+  return cairoDayKey(new Date()) + "_" + new Intl.DateTimeFormat("en-GB", { timeZone: APP_TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date()).replace(":", "-");
+}
+function loadScriptOnce(src, id) {
+  return new Promise((resolve, reject) => {
+    if (document.getElementById(id)) return resolve();
+    const s = document.createElement("script");
+    s.id = id; s.src = src;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("تعذّر تحميل مكتبة Excel"));
+    document.head.appendChild(s);
+  });
+}
+/* قيم مواصفات الصنف خام (بدون تهريب HTML) لعرضها في Excel */
+function storageSpecsRaw(it) {
+  const parts = [];
+  storageSpecsOf(it.category).forEach((sp) => {
+    const v = it[sp.key];
+    if (v !== undefined && v !== null && v !== "") parts.push(String(v) + (sp.unit ? " " + sp.unit : ""));
+  });
+  return parts.join(" • ");
+}
+/* تنزيل نسخة للعرض بصيغة Excel (.xlsx) — سهلة القراءة */
+async function downloadBackupExcel() {
+  if (!canEdit()) return;
+  try {
+    toast("جارٍ تجهيز ملف Excel...");
+    await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js", "sheetjs-lib");
+    const XLSX = window.XLSX;
+    if (!XLSX) throw new Error("مكتبة Excel غير متوفّرة");
+    const nm = (id) => { const c = (DB.customers || []).find((x) => x.id === id); return c ? c.name : ""; };
+    const add = (wb, arr, name) => { if (arr && arr.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(arr), name.slice(0, 31)); };
+    const wb = XLSX.utils.book_new();
+    add(wb, (DB.customers || []).map((c) => ({ "المعرّف": c.id, "اسم العميل": c.name })), "العملاء");
+    add(wb, (DB.bills || []).map((b) => ({ "رقم الفاتورة": b.docNo || "", "التاريخ": fmtDate(b.date), "العميل": nm(b.customerId), "الأصناف": (b.items || []).map((it) => `${it.description || ""}${it.size ? " (" + it.size + ")" : ""} ×${it.count || 0}`).join(" | "), "الإجمالي": b.total })), "الفواتير");
+    add(wb, (DB.payments || []).map((p) => ({ "الرقم": p.docNo || "", "التاريخ": fmtDate(p.date), "العميل": nm(p.customerId), "النوع": kindLabel(kindOf(p)), "المبلغ": p.amount, "الملاحظة": p.note || "" })), "الدفعات والحركات");
+    add(wb, (DB.cancelled || []).map((c) => ({ "رقم": c.docNo || "", "التاريخ": fmtDate(c.date), "العميل": c.customerName || "", "السبب": c.reason || "", "الإجمالي": c.total })), "الفواتير الملغية");
+    add(wb, (DB.storage || []).map((it) => ({ "التصنيف": it.category, "المقاس": it.sub || "", "المواصفات": storageSpecsRaw(it), "الكمية": it.quantity, "الملاحظة": it.note || "", "التوقيت": fmtDateTime(it.date) })), "المخزن");
+    add(wb, (DB.storageEvents || []).map((e) => ({ "التوقيت": fmtDateTime(e.date), "الإجراء": (STORAGE_EVENT_LABELS[e.type] || e.type), "الصنف": (e.category + (e.sub ? " " + e.sub : "")) + (e.specs ? " — " + e.specs : ""), "الكمية": e.amount, "التفاصيل": e.reason || "", "المستخدم": e.actor || "" })), "سجل المخزن");
+    if (!wb.SheetNames.length) { toast("لا توجد بيانات للتصدير", true); return; }
+    XLSX.writeFile(wb, `az-backup-${backupStamp()}.xlsx`);
+    toast("تم تنزيل ملف Excel");
+  } catch (e) { toast(errMsg(e, "تعذّر تجهيز Excel"), true); }
+}
 function renderUsersTab() {  const rows = activeSessions.length ? activeSessions.map((s) => {
     const me = currentUser && s.userId === currentUser.userId;
     return `<tr>
@@ -1563,9 +1607,12 @@ function renderUsersTab() {  const rows = activeSessions.length ? activeSessions
     ${canEdit() ? `<div class="section-head" style="margin-bottom:12px">
       <div>
         <h3 style="margin:0">النسخ الاحتياطي</h3>
-        <p class="qty-sub" style="margin:4px 0 0">نزّل ملفاً يحوي كل البيانات (العملاء، الفواتير، الدفعات، الملغية، والمخزن) واحفظه عندك.</p>
+        <p class="qty-sub" style="margin:4px 0 0">احفظ ملفاً يحوي كل البيانات. «Excel» للعرض والقراءة، و«JSON» للحفظ والاسترجاع.</p>
       </div>
-      <button class="btn btn-primary btn-sm" onclick="downloadBackup()">⬇ تنزيل نسخة احتياطية</button>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="downloadBackupExcel()">⬇ تنزيل Excel (للعرض)</button>
+        <button class="btn btn-outline btn-sm" onclick="downloadBackup()">⬇ JSON (للاسترجاع)</button>
+      </div>
     </div>` : ""}
     <div class="stats-row">
       <div class="stat-card">
