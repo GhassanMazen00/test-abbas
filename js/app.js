@@ -1524,9 +1524,10 @@ function deleteCancelled(id) {
 /* ---------- تبويب المستخدمون (من متصل الآن + تسجيل خروج) ---------- */
 let activeSessions = [];
 /* تنزيل نسخة احتياطية كاملة (JSON) — كل ما هو محمّل في الذاكرة */
-function downloadBackup() {
+async function downloadBackup() {
   if (!canEdit()) return; // المدير (loai) فقط
   try {
+    try { await Store.loadAll(); } catch (e) {} // جلب أحدث البيانات قبل التنزيل
     const data = {
       app: "AZ Accounting",
       exportedAt: new Date().toISOString(),
@@ -1577,6 +1578,7 @@ async function downloadBackupExcel() {
   if (!canEdit()) return;
   try {
     toast("جارٍ تجهيز ملف Excel...");
+    try { await Store.loadAll(); } catch (e) {} // جلب أحدث البيانات قبل التنزيل
     await loadScriptOnce("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js", "sheetjs-lib");
     const XLSX = window.XLSX;
     if (!XLSX) throw new Error("مكتبة Excel غير متوفّرة");
