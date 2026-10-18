@@ -1753,7 +1753,7 @@ const STORAGE_SCHEMA = {
       { key: "state", label: "مفتوح / مقفول", type: "select", options: ["مفتوح", "مقفول"] },
       { key: "color", label: "اللون", type: "text" },
       { key: "colorNum", label: "رقم اللون", type: "text", opt: true },
-      { key: "size", label: "المقاس (سم)", type: "number", unit: "سم" },
+      { key: "size", label: "الطول (سم)", type: "number", unit: "سم" },
       { key: "jarrarShape", label: "شكل الجرار", type: "text" }
     ]
   },
@@ -1797,6 +1797,7 @@ let storageRoot = "#storage-content";
 let storageGroup = null, storageCat = null, storageHomeQuery = "", storageCatQuery = "", storageSubFilter = "";
 let storageTab = "store"; // store | temps | history
 let storageHistFrom = "", storageHistTo = "", storageHistType = "", storageHistItem = "";
+let storageRetDest = "same", storageRetExistingId = null, storageRetExQuery = "";
 const STORAGE_EVENT_LABELS = {
   item_added: "إضافة صنف",
   qty_added: "إضافة كمية",
@@ -2046,42 +2047,71 @@ function storageReturnForm(wId) {
   const it = storageItems().find((x) => x.id === w.itemId);
   const cat = it ? it.category : (w.category || "");
   const outstanding = w.amount - w.returned;
+  storageRetDest = "same"; storageRetExistingId = null; storageRetExQuery = "";
   openModal(`إرجاع — ${it ? storageItemFullLabel(it) : esc(cat)}`, `
     <p class="info-line">خارج الآن: <b>${outstanding.toLocaleString("ar-EG")}</b>${w.reason ? " • السبب: " + esc(w.reason) : ""}</p>
-    <div class="field"><label>الكمية المُرجعة</label><input type="number" id="ret-amt" min="1" max="${outstanding}" value="${outstanding}" /></div>
+    <div class="field"><label>الكمية المُرجعة</label><input type="number" id="ret-amt" min="1" max="${outstanding}" value="${outstanding}" inputmode="decimal" oninput="this.value=this.value.replace(/[^0-9.]/g,'')" /></div>
     <div class="field"><label>وجهة الإرجاع</label>
-      <select id="ret-dest" onchange="storageReturnDestChanged(${wId})">
-        <option value="same">إرجاع لنفس الصنف (بدون تغيير)</option>
-        <option value="new">صنف جديد (تغيّر الطول/اللون)</option>
-        <option value="existing">صنف موجود (${esc(cat)})</option>
-      </select>
+      <div class="seg" id="ret-dest-seg">
+        <button type="button" class="seg-btn active" data-d="same" onclick="storageRetSetDest(${wId}, 'same')">نفس الصنف</button>
+        <button type="button" class="seg-btn" data-d="new" onclick="storageRetSetDest(${wId}, 'new')">صنف جديد</button>
+        <button type="button" class="seg-btn" data-d="existing" onclick="storageRetSetDest(${wId}, 'existing')">صنف موجود</button>
+      </div>
     </div>
     <div id="ret-dest-body"></div>
     <div class="modal-actions">
       <button class="btn btn-success" onclick="storageReturnConfirm(${wId})">تأكيد الإرجاع</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>`);
-  storageReturnDestChanged(wId);
+  storageRetRenderBody(wId);
 }
-function storageReturnDestChanged(wId) {
+function storageRetSetDest(wId, mode) {
+  storageRetDest = mode; storageRetExistingId = null; storageRetExQuery = "";
+  const seg = document.querySelector("#ret-dest-seg");
+  if (seg) seg.querySelectorAll(".seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.d === mode));
+  storageRetRenderBody(wId);
+}
+function storageRetRenderBody(wId) {
   const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
   if (!w) return;
   const cat = (storageItems().find((x) => x.id === w.itemId) || {}).category || w.category || "";
-  const dest = $("#ret-dest") ? $("#ret-dest").value : "same";
   const body = $("#ret-dest-body");
   if (!body) return;
-  if (dest === "new") {
-    const subs = storageSubsOf(cat);
-    const subSel = subs.length ? `<div class="field"><label>المقاس (mm)</label><select id="ret-new-sub">${subs.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></div>` : "";
-    body.innerHTML = `<div class="form-grid">${subSel}${storageSpecFieldsHtml(cat)}<div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div></div>`;
-  } else if (dest === "existing") {
-    const items = storageItems().filter((x) => x.category === cat && x.id !== w.itemId);
-    body.innerHTML = items.length
-      ? `<div class="field"><label>اختر الصنف (${esc(cat)})</label><select id="ret-existing">${items.map((x) => `<option value="${x.id}">${esc(storageItemFullLabel(x))}</option>`).join("")}</select></div>`
-      : `<p class="info-line">لا يوجد صنف آخر من «${esc(cat)}» — اختر «صنف جديد».</p>`;
+  if (storageRetDest === "new") {
+    // المقاس (mm) لا يتغيّر — نفس مقاس الأصلي، فلا نطلبه
+    body.innerHTML = `<div class="form-grid">${storageSpecFieldsHtml(cat)}<div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div></div>`;
+  } else if (storageRetDest === "existing") {
+    const others = storageItems().filter((x) => x.category === cat && x.id !== w.itemId);
+    if (!others.length) { body.innerHTML = `<p class="info-line">لا يوجد صنف آخر من «${esc(cat)}» — اختر «صنف جديد».</p>`; return; }
+    body.innerHTML = `
+      <div class="search-bar"><input type="text" id="ret-ex-search" placeholder="ابحث عن الصنف (لون، مقاس، ملاحظة...)" value="${esc(storageRetExQuery)}" /></div>
+      <div id="ret-ex-list" class="ret-ex-list"></div>`;
+    const inp = $("#ret-ex-search");
+    if (inp) inp.oninput = () => { storageRetExQuery = inp.value; storageRetRenderExList(wId); };
+    storageRetRenderExList(wId);
   } else {
     body.innerHTML = "";
   }
+}
+function storageRetRenderExList(wId) {
+  const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
+  if (!w) return;
+  const cat = (storageItems().find((x) => x.id === w.itemId) || {}).category || w.category || "";
+  let items = storageItems().filter((x) => x.category === cat && x.id !== w.itemId);
+  const q = storageRetExQuery.trim();
+  if (q) items = items.filter((x) => storageMatch(x, q));
+  const list = $("#ret-ex-list");
+  if (!list) return;
+  list.innerHTML = items.length ? items.map((x) => `
+    <button type="button" class="ret-ex-item${storageRetExistingId === x.id ? " active" : ""}" data-id="${x.id}" onclick="storageRetPickExisting(${x.id})">
+      <span class="ret-ex-name">${esc(storageItemFullLabel(x))}</span>
+      <span class="qty-sub">الكمية: ${Number(x.quantity).toLocaleString("ar-EG")}</span>
+    </button>`).join("") : `<p class="empty-msg">لا يوجد صنف مطابق.</p>`;
+}
+function storageRetPickExisting(id) {
+  storageRetExistingId = id;
+  const list = document.querySelector("#ret-ex-list");
+  if (list) list.querySelectorAll(".ret-ex-item").forEach((b) => b.classList.toggle("active", Number(b.getAttribute("data-id")) === id));
 }
 async function storageReturnConfirm(wId) {
   const w = (DB.storageWithdrawals || []).find((x) => x.id === wId);
@@ -2092,30 +2122,27 @@ async function storageReturnConfirm(wId) {
   const amt = Math.abs(Number($("#ret-amt") ? $("#ret-amt").value : 0) || 0);
   if (!amt) { toast("أدخل كمية الإرجاع", true); return; }
   if (amt > outstanding) { toast("الكمية أكبر من المتبقّي خارج المخزن (" + outstanding.toLocaleString("ar-EG") + ")", true); return; }
-  const dest = $("#ret-dest") ? $("#ret-dest").value : "same";
+  const dest = storageRetDest;
   const origSpecs = it ? storageSpecCells(it) : "";
   try {
     if (dest === "same") {
       await Store.returnTempWithdrawal(wId, amt);
       await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, w.reason, origSpecs);
     } else if (dest === "new") {
-      const subs = storageSubsOf(cat);
-      const sub = subs.length ? ($("#ret-new-sub") ? $("#ret-new-sub").value : "") : "";
       const obj = storageCollectSpecs(cat);
       if (obj === null) return;
-      obj.category = cat; obj.sub = sub; obj.quantity = amt; obj.note = ($("#st-note") ? $("#st-note").value : "").trim();
+      obj.category = cat; obj.sub = it ? it.sub : ""; obj.quantity = amt; obj.note = ($("#st-note") ? $("#st-note").value : "").trim();
       const rec = await Store.addStorageItem(obj);
       await Store.markWithdrawalReturned(wId, amt);
       await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, "تغيير — إلى صنف جديد", origSpecs);
-      await logStore(rec ? rec.id : null, cat, sub, "item_added", amt, obj.note, storageSpecCells(rec || obj));
+      await logStore(rec ? rec.id : null, cat, obj.sub, "item_added", amt, obj.note, storageSpecCells(rec || obj));
     } else {
-      const tid = Number($("#ret-existing") ? $("#ret-existing").value : 0) || 0;
-      const target = storageItems().find((x) => x.id === tid);
-      if (!target) { toast("اختر صنفاً موجوداً", true); return; }
-      await Store.updateStorageItem(tid, { quantity: target.quantity + amt });
+      const target = storageItems().find((x) => x.id === storageRetExistingId);
+      if (!target) { toast("ابحث واختر صنفاً موجوداً", true); return; }
+      await Store.updateStorageItem(target.id, { quantity: target.quantity + amt });
       await Store.markWithdrawalReturned(wId, amt);
       await logStore(w.itemId, cat, it ? it.sub : "", "returned", amt, "تغيير — إلى صنف موجود", origSpecs);
-      await logStore(tid, target.category, target.sub, "qty_added", amt, "إرجاع من سحب مؤقت", storageSpecCells(target));
+      await logStore(target.id, target.category, target.sub, "qty_added", amt, "إرجاع من سحب مؤقت", storageSpecCells(target));
     }
     closeModal(); toast("تم الإرجاع"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر الإرجاع"), true); }
@@ -2224,7 +2251,7 @@ function storageSpecFieldsHtml(cat) {
       return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><select id="st-${sp.key}"${onCh}>${opts}</select></div>`;
     }
     const inType = sp.type === "number" ? "number" : "text";
-    const minAttr = sp.type === "number" ? ' min="0"' : "";
+    const minAttr = sp.type === "number" ? ' min="0" inputmode="decimal" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"' : "";
     return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><input type="${inType}"${minAttr} id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
   }).join("");
 }
