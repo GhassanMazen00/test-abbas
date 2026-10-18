@@ -1523,8 +1523,33 @@ function deleteCancelled(id) {
 
 /* ---------- تبويب المستخدمون (من متصل الآن + تسجيل خروج) ---------- */
 let activeSessions = [];
-function renderUsersTab() {
-  const rows = activeSessions.length ? activeSessions.map((s) => {
+/* تنزيل نسخة احتياطية كاملة (JSON) — كل ما هو محمّل في الذاكرة */
+function downloadBackup() {
+  try {
+    const data = {
+      app: "AZ Accounting",
+      exportedAt: new Date().toISOString(),
+      exportedBy: currentUser ? currentUser.username : "",
+      customers: DB.customers || [],
+      bills: DB.bills || [],
+      payments: DB.payments || [],
+      cancelled: DB.cancelled || [],
+      storage: DB.storage || [],
+      storageWithdrawals: DB.storageWithdrawals || [],
+      storageEvents: DB.storageEvents || []
+    };
+    const counts = `${(DB.customers || []).length} عميل، ${(DB.bills || []).length} فاتورة، ${(DB.payments || []).length} حركة، ${(DB.storage || []).length} صنف مخزن`;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const stamp = cairoDayKey(new Date()) + "_" + new Intl.DateTimeFormat("en-GB", { timeZone: APP_TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date()).replace(":", "-");
+    const a = document.createElement("a");
+    a.href = url; a.download = `az-backup-${stamp}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("تم تنزيل النسخة الاحتياطية (" + counts + ")");
+  } catch (e) { toast(errMsg(e, "تعذّر تنزيل النسخة الاحتياطية"), true); }
+}
+function renderUsersTab() {  const rows = activeSessions.length ? activeSessions.map((s) => {
     const me = currentUser && s.userId === currentUser.userId;
     return `<tr>
       <td>${esc(s.username) || "—"}${me ? ' <span class="badge badge-success">أنت</span>' : ""}</td>
@@ -1534,6 +1559,13 @@ function renderUsersTab() {
     </tr>`;
   }).join("") : '<tr><td colspan="4" class="empty-msg">لا يوجد مستخدمون متصلون حالياً.</td></tr>';
   $("#tab-users").innerHTML = `
+    <div class="section-head" style="margin-bottom:12px">
+      <div>
+        <h3 style="margin:0">النسخ الاحتياطي</h3>
+        <p class="qty-sub" style="margin:4px 0 0">نزّل ملفاً يحوي كل البيانات (العملاء، الفواتير، الدفعات، الملغية، والمخزن) واحفظه عندك.</p>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="downloadBackup()">⬇ تنزيل نسخة احتياطية</button>
+    </div>
     <div class="stats-row">
       <div class="stat-card">
         <div class="stat-label">المتصلون الآن</div>
