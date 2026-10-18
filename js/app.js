@@ -1525,6 +1525,7 @@ function deleteCancelled(id) {
 let activeSessions = [];
 /* تنزيل نسخة احتياطية كاملة (JSON) — كل ما هو محمّل في الذاكرة */
 function downloadBackup() {
+  if (!canEdit()) return; // المدير (loai) فقط
   try {
     const data = {
       app: "AZ Accounting",
@@ -1559,13 +1560,13 @@ function renderUsersTab() {  const rows = activeSessions.length ? activeSessions
     </tr>`;
   }).join("") : '<tr><td colspan="4" class="empty-msg">لا يوجد مستخدمون متصلون حالياً.</td></tr>';
   $("#tab-users").innerHTML = `
-    <div class="section-head" style="margin-bottom:12px">
+    ${canEdit() ? `<div class="section-head" style="margin-bottom:12px">
       <div>
         <h3 style="margin:0">النسخ الاحتياطي</h3>
         <p class="qty-sub" style="margin:4px 0 0">نزّل ملفاً يحوي كل البيانات (العملاء، الفواتير، الدفعات، الملغية، والمخزن) واحفظه عندك.</p>
       </div>
       <button class="btn btn-primary btn-sm" onclick="downloadBackup()">⬇ تنزيل نسخة احتياطية</button>
-    </div>
+    </div>` : ""}
     <div class="stats-row">
       <div class="stat-card">
         <div class="stat-label">المتصلون الآن</div>
