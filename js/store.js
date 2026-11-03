@@ -142,6 +142,12 @@ const Store = (function () {
       const bl = DB.bills.find((b) => b.id === id); if (bl) { bl.items = items; bl.total = total; bl.docNo = docNo; if (dateISO) bl.date = dateISO; }
       if (!useSupabase) saveDB(DB);
     },
+    /* نقل فاتورة إلى عميل آخر (كل أرقامها تنتقل معها لأنها تتبع العميل) */
+    async moveBill(id, newCustomerId) {
+      if (useSupabase) { const { error } = await sb.from("bills").update({ customer_id: newCustomerId }).eq("id", id); if (error) throw error; }
+      const bl = DB.bills.find((b) => b.id === id); if (bl) bl.customerId = newCustomerId;
+      if (!useSupabase) saveDB(DB);
+    },
     async deleteBill(id) {
       if (useSupabase) { const { error } = await sb.from("bills").delete().eq("id", id); if (error) throw error; }
       DB.bills = DB.bills.filter((b) => b.id !== id);
