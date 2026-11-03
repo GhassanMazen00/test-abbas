@@ -3142,6 +3142,7 @@ function billsPageRows(custId) {
       <td class="num">${fmtMoney(b.total)}</td>
       ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="openBillForm(${custId}, ${b.id})">تعديل</button>
+        <button class="btn btn-transfer btn-sm" onclick="moveBillForm(${custId}, ${b.id})">نقل</button>
         <button class="btn btn-danger btn-sm" onclick="deleteBill(${b.id})">حذف</button>
       </td>` : ""}
     </tr>`).join("");
@@ -3150,6 +3151,59 @@ function billsSearchInput(custId, val) {
   billsSearchQuery = val;
   const tb = $("#bills-body");
   if (tb) tb.innerHTML = billsPageRows(custId);
+}
+/* --- نقل فاتورة إلى عميل آخر (للمدير loai فقط) --- */
+let billMoveQuery = "", billMoveTargetId = null;
+function moveBillForm(custId, billId) {
+  if (!canEdit()) return;
+  const b = DB.bills.find((x) => x.id === billId);
+  if (!b) return;
+  billMoveQuery = ""; billMoveTargetId = null;
+  const cur = customerById(custId);
+  openModal("نقل الفاتورة إلى عميل آخر", `
+    <p class="info-line">الفاتورة ${docCell(b.docNo)} — الإجمالي <b>${fmtMoney(b.total)}</b> — من <b>${cur ? esc(cur.name) : "—"}</b></p>
+    <p class="qty-sub" style="margin:0 0 8px">ستنتقل الفاتورة بكل أرقامها (الإجمالي والأصناف) إلى العميل الجديد، وتتحدّث أرصدة الطرفين.</p>
+    <div class="search-bar"><input type="text" id="movebill-search" placeholder="ابحث عن العميل المنقول إليه..." value="" /></div>
+    <div id="movebill-list" class="ret-ex-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="moveBillConfirm(${custId}, ${billId})">تأكيد النقل</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+  const inp = $("#movebill-search");
+  if (inp) inp.oninput = () => { billMoveQuery = inp.value; renderMoveBillList(custId); };
+  renderMoveBillList(custId);
+}
+function renderMoveBillList(custId) {
+  const list = $("#movebill-list");
+  if (!list) return;
+  let custs = DB.customers.filter((c) => c.id !== custId);
+  const q = billMoveQuery.trim();
+  if (q) { const set = new Set(matchCustomers(q).map((c) => c.id)); custs = custs.filter((c) => set.has(c.id)); }
+  else custs = custs.slice(0, 50);
+  list.innerHTML = custs.length ? custs.map((c) => `
+    <button type="button" class="ret-ex-item${billMoveTargetId === c.id ? " active" : ""}" data-id="${c.id}" onclick="pickMoveBillTarget(${c.id})">
+      <span class="ret-ex-name">${esc(c.name)}</span>
+      <span class="qty-sub">الرصيد: ${fmtMoney(balanceOf(c.id))}</span>
+    </button>`).join("") : '<p class="empty-msg">لا يوجد عميل مطابق.</p>';
+}
+function pickMoveBillTarget(id) {
+  billMoveTargetId = id;
+  const list = document.querySelector("#movebill-list");
+  if (list) list.querySelectorAll(".ret-ex-item").forEach((b) => b.classList.toggle("active", Number(b.getAttribute("data-id")) === id));
+}
+async function moveBillConfirm(custId, billId) {
+  if (!canEdit()) return;
+  if (!billMoveTargetId) { toast("ابحث واختر العميل المنقول إليه", true); return; }
+  const target = customerById(billMoveTargetId);
+  const b = DB.bills.find((x) => x.id === billId);
+  if (!target || !b) return;
+  try {
+    await Store.moveBill(billId, billMoveTargetId);
+    closeModal();
+    toast("تم نقل الفاتورة إلى " + target.name);
+    if (currentUser && currentUser.role === "manager") renderManager();
+    refreshSubpage();
+  } catch (e) { toast(errMsg(e, "تعذّر نقل الفاتورة"), true); }
 }
 function renderBillsPage(custId) {
   const count = billsOf(custId).length;
