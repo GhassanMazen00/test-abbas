@@ -175,6 +175,11 @@ const Store = (function () {
       const py = DB.payments.find((p) => p.id === id); if (py) { py.amount = amount; py.note = note; py.docNo = docNo; if (dateISO) py.date = dateISO; if (items !== undefined) py.items = items; }
       if (!useSupabase) saveDB(DB);
     },
+    async movePayment(id, newCustomerId) {
+      if (useSupabase) { const { error } = await sb.from("payments").update({ customer_id: newCustomerId }).eq("id", id); if (error) throw error; }
+      const py = DB.payments.find((p) => p.id === id); if (py) py.customerId = newCustomerId;
+      if (!useSupabase) saveDB(DB);
+    },
     async deletePayment(id) {
       if (useSupabase) { const { error } = await sb.from("payments").delete().eq("id", id); if (error) throw error; }
       DB.payments = DB.payments.filter((p) => p.id !== id);

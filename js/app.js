@@ -3205,6 +3205,59 @@ async function moveBillConfirm(custId, billId) {
     refreshSubpage();
   } catch (e) { toast(errMsg(e, "تعذّر نقل الفاتورة"), true); }
 }
+/* --- نقل دفعة/حركة إلى عميل آخر (للمدير loai فقط) --- */
+let payMoveQuery = "", payMoveTargetId = null;
+function movePaymentForm(custId, payId) {
+  if (!canEdit()) return;
+  const p = DB.payments.find((x) => x.id === payId);
+  if (!p) return;
+  payMoveQuery = ""; payMoveTargetId = null;
+  const cur = customerById(custId);
+  openModal("نقل الحركة إلى عميل آخر", `
+    <p class="info-line">${kindBadge(kindOf(p))} ${docCell(p.docNo)} — المبلغ <b>${fmtMoney(p.amount)}</b> — من <b>${cur ? esc(cur.name) : "—"}</b></p>
+    <p class="qty-sub" style="margin:0 0 8px">ستنتقل الحركة بنفس رقمها ومبلغها إلى العميل الجديد، وتتحدّث أرصدة الطرفين.</p>
+    <div class="search-bar"><input type="text" id="movepay-search" placeholder="ابحث عن العميل المنقول إليه..." value="" /></div>
+    <div id="movepay-list" class="ret-ex-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="movePaymentConfirm(${custId}, ${payId})">تأكيد النقل</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+  const inp = $("#movepay-search");
+  if (inp) inp.oninput = () => { payMoveQuery = inp.value; renderMovePayList(custId); };
+  renderMovePayList(custId);
+}
+function renderMovePayList(custId) {
+  const list = $("#movepay-list");
+  if (!list) return;
+  let custs = DB.customers.filter((c) => c.id !== custId);
+  const q = payMoveQuery.trim();
+  if (q) { const set = new Set(matchCustomers(q).map((c) => c.id)); custs = custs.filter((c) => set.has(c.id)); }
+  else custs = custs.slice(0, 50);
+  list.innerHTML = custs.length ? custs.map((c) => `
+    <button type="button" class="ret-ex-item${payMoveTargetId === c.id ? " active" : ""}" data-id="${c.id}" onclick="pickMovePayTarget(${c.id})">
+      <span class="ret-ex-name">${esc(c.name)}</span>
+      <span class="qty-sub">الرصيد: ${fmtMoney(balanceOf(c.id))}</span>
+    </button>`).join("") : '<p class="empty-msg">لا يوجد عميل مطابق.</p>';
+}
+function pickMovePayTarget(id) {
+  payMoveTargetId = id;
+  const list = document.querySelector("#movepay-list");
+  if (list) list.querySelectorAll(".ret-ex-item").forEach((b) => b.classList.toggle("active", Number(b.getAttribute("data-id")) === id));
+}
+async function movePaymentConfirm(custId, payId) {
+  if (!canEdit()) return;
+  if (!payMoveTargetId) { toast("ابحث واختر العميل المنقول إليه", true); return; }
+  const target = customerById(payMoveTargetId);
+  const p = DB.payments.find((x) => x.id === payId);
+  if (!target || !p) return;
+  try {
+    await Store.movePayment(payId, payMoveTargetId);
+    closeModal();
+    toast("تم نقل الحركة إلى " + target.name);
+    if (currentUser && currentUser.role === "manager") renderManager();
+    refreshSubpage();
+  } catch (e) { toast(errMsg(e, "تعذّر نقل الحركة"), true); }
+}
 function renderBillsPage(custId) {
   const count = billsOf(custId).length;
   return `
@@ -3243,6 +3296,7 @@ function renderPaymentsPage(custId) {
       <td>${desc}</td>
       ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="${editCall}">تعديل</button>
+        <button class="btn btn-transfer btn-sm" onclick="movePaymentForm(${custId}, ${p.id})">نقل</button>
         <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">حذف</button>
       </td>` : ""}
     </tr>`;
