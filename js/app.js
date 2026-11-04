@@ -3210,7 +3210,7 @@ let payMoveQuery = "", payMoveTargetId = null;
 function movePaymentForm(custId, payId) {
   if (!canEdit()) return;
   const p = DB.payments.find((x) => x.id === payId);
-  if (!p) return;
+  if (!p || kindOf(p) !== "payment") return;
   payMoveQuery = ""; payMoveTargetId = null;
   const cur = customerById(custId);
   openModal("نقل الحركة إلى عميل آخر", `
@@ -3249,7 +3249,7 @@ async function movePaymentConfirm(custId, payId) {
   if (!payMoveTargetId) { toast("ابحث واختر العميل المنقول إليه", true); return; }
   const target = customerById(payMoveTargetId);
   const p = DB.payments.find((x) => x.id === payId);
-  if (!target || !p) return;
+  if (!target || !p || kindOf(p) !== "payment") return;
   try {
     await Store.movePayment(payId, payMoveTargetId);
     closeModal();
@@ -3296,7 +3296,7 @@ function renderPaymentsPage(custId) {
       <td>${desc}</td>
       ${canEdit() ? `<td class="row-actions">
         <button class="btn btn-outline btn-sm" onclick="${editCall}">تعديل</button>
-        <button class="btn btn-transfer btn-sm" onclick="movePaymentForm(${custId}, ${p.id})">نقل</button>
+        ${kindOf(p) === "payment" ? `<button class="btn btn-transfer btn-sm" onclick="movePaymentForm(${custId}, ${p.id})">نقل</button>` : ""}
         <button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">حذف</button>
       </td>` : ""}
     </tr>`;
