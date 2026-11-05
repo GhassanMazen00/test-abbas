@@ -1529,7 +1529,7 @@ async function downloadBackup() {
   try {
     try { await Store.loadAll(); } catch (e) {} // جلب أحدث البيانات قبل التنزيل
     const data = {
-      app: "AZ Accounting",
+      app: "SYS-092356",
       exportedAt: new Date().toISOString(),
       exportedBy: currentUser ? currentUser.username : "",
       customers: DB.customers || [],
