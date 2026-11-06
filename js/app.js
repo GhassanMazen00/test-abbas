@@ -2394,6 +2394,7 @@ function storageQtyForm(id, mode) {
   openModal(`${isAdd ? "إضافة كمية" : "سحب كمية"} — ${it.category} ${it.sub}`, `
     <p class="info-line">الكمية الحالية: <b>${Number(it.quantity).toLocaleString("ar-EG")}</b></p>
     <div class="field"><label>${isAdd ? "الكمية المضافة" : "الكمية المسحوبة"}</label><input type="number" id="st-adj" min="1" placeholder="0" /></div>
+    <div class="field field-full"><label>ملاحظة (إلزامي)</label><textarea id="st-adj-note" placeholder="${isAdd ? "سبب الإضافة..." : "سبب السحب..."}"></textarea></div>
     <div class="modal-actions">
       <button class="btn ${isAdd ? "btn-success" : "btn-warning"}" onclick="storageApplyQty(${id}, '${mode}')">${isAdd ? "إضافة" : "سحب"}</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
@@ -2404,11 +2405,13 @@ async function storageApplyQty(id, mode) {
   if (!it) return;
   const amt = Math.abs(Number($("#st-adj") ? $("#st-adj").value : 0) || 0);
   if (!amt) { toast("أدخل كمية صحيحة", true); return; }
+  const note = ($("#st-adj-note") ? $("#st-adj-note").value : "").trim();
+  if (!note) { toast(mode === "add" ? "يرجى كتابة ملاحظة سبب الإضافة" : "يرجى كتابة ملاحظة سبب السحب", true); return; }
   const newQty = mode === "add" ? it.quantity + amt : it.quantity - amt;
   if (newQty < 0) { toast("الكمية المسحوبة أكبر من المتوفّر (" + it.quantity.toLocaleString("ar-EG") + ")", true); return; }
   try {
     await Store.updateStorageItem(id, { quantity: newQty });
-    await logStore(id, it.category, it.sub, mode === "add" ? "qty_added" : "qty_withdrawn", amt, "", storageSpecCells(it));
+    await logStore(id, it.category, it.sub, mode === "add" ? "qty_added" : "qty_withdrawn", amt, note, storageSpecCells(it));
     closeModal(); toast(mode === "add" ? "تمت إضافة الكمية" : "تم سحب الكمية"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر تحديث الكمية"), true); }
 }
