@@ -19,7 +19,7 @@ const Store = (function () {
   const mapBill = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, items: r.items || [], total: Number(r.total) || 0, docNo: r.doc_no || "" });
   const mapPayment = (r) => ({ id: r.id, customerId: r.customer_id, date: r.created_at, amount: Number(r.amount) || 0, note: r.note || "", docNo: r.doc_no || "", kind: r.kind || "payment", items: r.items || [] });
   const mapCancelled = (r) => ({ id: r.id, docNo: r.doc_no || "", customerName: r.customer_name || "", items: r.items || [], total: Number(r.total) || 0, reason: r.reason || "", date: r.created_at });
-  const mapStorage = (r) => ({ id: r.id, category: r.category || "", sub: r.sub || "", state: r.state || "", openType: r.open_type || "", color: r.color || "", colorNum: r.color_num || "", size: r.size || "", jarrarShape: r.jarrar_shape || "", quantity: Number(r.quantity) || 0, note: r.note || "", date: r.created_at });
+  const mapStorage = (r) => ({ id: r.id, category: r.category || "", sub: r.sub || "", state: r.state || "", openType: r.open_type || "", color: r.color || "", colorNum: r.color_num || "", size: r.size || "", jarrarShape: r.jarrar_shape || "", code: r.code || "", unitWeight: Number(r.unit_weight) || 0, image: r.image || "", quantity: Number(r.quantity) || 0, note: r.note || "", date: r.created_at });
   const mapWithdrawal = (r) => ({ id: r.id, itemId: r.item_id, amount: Number(r.amount) || 0, returned: Number(r.returned) || 0, reason: r.reason || "", date: r.created_at });
   const mapEvent = (r) => ({ id: r.id, itemId: r.item_id, category: r.category || "", sub: r.sub || "", type: r.type || "", amount: Number(r.amount) || 0, reason: r.reason || "", specs: r.specs || "", actor: r.actor || "", date: r.created_at });
 
@@ -226,11 +226,15 @@ const Store = (function () {
         color: it.color || "", color_num: it.colorNum || "", size: it.size || "", jarrar_shape: it.jarrarShape || "",
         quantity: Number(it.quantity) || 0, note: it.note || ""
       };
+      // أعمدة الجرار (كود/وزن/صورة) تُرسل فقط عند وجود قيمة — حتى لا تتأثر الأصناف الأخرى
+      if (it.code) row.code = it.code;
+      if (Number(it.unitWeight) > 0) row.unit_weight = Number(it.unitWeight);
+      if (it.image) row.image = it.image;
       if (!useSupabase) {
         if (!DB.storage) DB.storage = [];
         if (!DB.seq.storage) DB.seq.storage = 0;
         DB.seq.storage++;
-        const rec = { id: DB.seq.storage, category: row.category, sub: row.sub, state: row.state, openType: row.open_type, color: row.color, colorNum: row.color_num, size: row.size, jarrarShape: row.jarrar_shape, quantity: row.quantity, note: row.note, date: new Date().toISOString() };
+        const rec = { id: DB.seq.storage, category: row.category, sub: row.sub, state: row.state, openType: row.open_type, color: row.color, colorNum: row.color_num, size: row.size, jarrarShape: row.jarrar_shape, code: row.code || "", unitWeight: row.unit_weight || 0, image: row.image || "", quantity: row.quantity, note: row.note, date: new Date().toISOString() };
         DB.storage.push(rec); saveDB(DB); return rec;
       }
       const { data, error } = await sb.from("storage_items").insert(row).select().single();
