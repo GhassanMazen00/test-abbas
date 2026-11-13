@@ -706,6 +706,6 @@ table.bill-items input:focus { outline: 2px solid var(--primary); }
 .ret-ex-name { font-weight: 600; }
 
 /* ===== الجرار: صورة مصغّرة + معاينة الصورة في النموذج ===== */
-.st-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: inline-block; vertical-align: middle; background: var(--surface); }
+.st-thumb { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: inline-block; vertical-align: middle; background: var(--surface); }
 .st-thumb-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: default; }
 .st-img-prev img { margin-top: 8px; max-width: 160px; max-height: 160px; border-radius: 10px; border: 1px solid var(--border); object-fit: cover; }

@@ -1827,7 +1827,7 @@ const STORAGE_CATS = ["عضم", "نايلون", "جرار"];
 const STORAGE_HOME_GROUPS = [
   { name: "عضم", types: ["عضم", "رول عضم"] },
   { name: "نايلون", types: ["نايلون", "رول نايلون", "مسحورة 3mm"] },
-  { name: "جرار", types: ["جرار نايلون", "جرار عضم"] }
+  { name: "جرار", types: ["جرار نايلون", "جرار عضم", "ميدالية"] }
 ];
 const STORAGE_SCHEMA = {
   "عضم": {
@@ -1877,16 +1877,24 @@ const STORAGE_SCHEMA = {
   },
   // الجرار: الكمية بالغرام، وعدد الجرارات = الكمية ÷ وزن الجرار. الكود تلقائي (N101… / P101…)
   "جرار نايلون": {
-    subs: [], short: "نايلون", jarrar: { prefix: "N" },
+    subs: ["3mm", "4mm", "5mm", "7mm"], short: "نايلون", jarrar: { prefix: "N" },
     specs: [
+      { key: "state", label: "وش / عكسي", type: "select", options: ["وش", "عكسي"] },
       { key: "unitWeight", label: "وزن الجرار (غرام)", type: "number", unit: "غ" },
       { key: "color", label: "اللون", type: "text" }
     ]
   },
   "جرار عضم": {
-    subs: [], short: "عضم", jarrar: { prefix: "P" },
+    subs: ["3mm", "5mm", "8mm"], short: "عضم", jarrar: { prefix: "P" },
     specs: [
       { key: "unitWeight", label: "وزن الجرار (غرام)", type: "number", unit: "غ" },
+      { key: "color", label: "اللون", type: "text" }
+    ]
+  },
+  "ميدالية": {
+    subs: [], short: "ميدالية", jarrar: { prefix: "M" },
+    specs: [
+      { key: "unitWeight", label: "وزن القطعة (غرام)", type: "number", unit: "غ" },
       { key: "color", label: "اللون", type: "text" }
     ]
   }
@@ -1902,11 +1910,12 @@ const STORAGE_EVENT_LABELS = {
   qty_withdrawn: "سحب كمية",
   temp_withdrawn: "سحب مؤقت",
   returned: "إرجاع",
+  item_edited: "تعديل صنف",
   item_deleted: "حذف صنف"
 };
 const STORAGE_EVENT_BADGE = {
   item_added: "badge-success", qty_added: "badge-success", qty_withdrawn: "badge-warning",
-  temp_withdrawn: "badge-transfer", returned: "badge-success", item_deleted: "badge-danger"
+  temp_withdrawn: "badge-transfer", returned: "badge-success", item_edited: "badge-transfer", item_deleted: "badge-danger"
 };
 function storageEventBadge(type) { return `<span class="badge ${STORAGE_EVENT_BADGE[type] || ""}">${STORAGE_EVENT_LABELS[type] || esc(type)}</span>`; }
 /* تسجيل حدث في سجلّ المخزن (بتوقيت القاهرة عند العرض) */
@@ -1921,6 +1930,35 @@ function storageSpecsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat
 function storageSubsOf(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].subs) || []; }
 /* ---------- الجرار: الوزن بالغرام + عدد الجرارات + الكود التلقائي + الصورة ---------- */
 function isJarrarCat(cat) { return !!(STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].jarrar); }
+/* إدخال رقم عشري مرن: يقبل ٢٫٣ أو 2,3 أو 2.3 والأرقام العربية، ويمنع الأحرف ونقطتين */
+function normDecimalInput(el) {
+  if (!el) return;
+  let v = String(el.value || "")
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/[٫,،]/g, ".")
+    .replace(/[^0-9.]/g, "");
+  const i = v.indexOf(".");
+  if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/\./g, "");
+  if (el.value !== v) el.value = v;
+}
+function round3(n) { return Math.round((Number(n) || 0) * 1000) / 1000; }
+/* أعمدة جدول الجرار حسب القسم (المقاس / وش-عكسي تظهر فقط حيث تنطبق) */
+function jarrarCols(cat) {
+  const cols = [
+    { h: "الصورة", c: (it) => `<td>${storageThumb(it)}</td>` },
+    { h: "الكود", c: (it) => `<td class="num"><b>${esc(it.code) || "—"}</b></td>` }
+  ];
+  if (storageSubsOf(cat).length) cols.push({ h: "المقاس", c: (it) => `<td class="num">${esc(it.sub) || "—"}</td>` });
+  if (storageSpecsOf(cat).some((sp) => sp.key === "state")) cols.push({ h: "وش / عكسي", c: (it) => `<td>${it.state ? esc(it.state) : "—"}</td>` });
+  cols.push(
+    { h: "الوزن", c: (it) => { const w = Number(it.unitWeight) || 0; return `<td class="num">${w > 0 ? w.toLocaleString("ar-EG") + " غ" : "—"}</td>`; } },
+    { h: "الكمية (غرام)", c: (it) => { const out = storageOutstanding(it.id); return `<td class="num"><b>${(Number(it.quantity) || 0).toLocaleString("ar-EG")} غ</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${storageQtyText(it, out)}</div>` : ""}</td>`; } },
+    { h: "العدد", c: (it) => `<td class="num"><b>${fmtPieces(storagePiecesOf(it))}</b></td>` },
+    { h: "اللون", c: (it) => `<td>${it.color ? esc(it.color) : "—"}</td>` }
+  );
+  return cols;
+}
 function storageTypeLabel(cat) { return (STORAGE_SCHEMA[cat] && STORAGE_SCHEMA[cat].short) || cat; }
 /* عدد الجرارات لكمية (بالغرام) — null إن لم يكن جراراً أو الوزن غير معروف */
 function storagePiecesOf(it, grams) {
@@ -2083,25 +2121,21 @@ function storageOutstanding(itemId) { return storageActiveWithdrawals(itemId).re
 function storageRowActions(it) {
   if (!canEditStorage()) return "";
   const active = storageActiveWithdrawals(it.id);
+  const jar = isJarrarCat(it.category); // الجرار: بدون سحب مؤقت
   return `<td class="row-actions">
       <button class="btn btn-success btn-sm" onclick="storageQtyForm(${it.id}, 'add')">+ كمية</button>
       <button class="btn btn-warning btn-sm" onclick="storageQtyForm(${it.id}, 'withdraw')">− سحب</button>
-      <button class="btn btn-transfer btn-sm" onclick="storageTempForm(${it.id})">سحب مؤقت</button>
+      ${jar ? "" : `<button class="btn btn-transfer btn-sm" onclick="storageTempForm(${it.id})">سحب مؤقت</button>`}
       ${active.length ? `<button class="btn btn-outline btn-sm" onclick="storageTempManage(${it.id})">إرجاع (${active.length.toLocaleString("ar-EG")})</button>` : ""}
+      ${canDeleteStorage() ? `<button class="btn btn-outline btn-sm" onclick="storageEditForm(${it.id})">تعديل</button>` : ""}
       ${canDeleteStorage() ? `<button class="btn btn-danger btn-sm" onclick="storageDeleteItem(${it.id})">حذف</button>` : ""}
     </td>`;
 }
 function storageCatRow(it) {
   const out = storageOutstanding(it.id);
   if (isJarrarCat(it.category)) {
-    const w = Number(it.unitWeight) || 0;
     return `<tr>
-    <td>${storageThumb(it)}</td>
-    <td class="num"><b>${esc(it.code) || "—"}</b></td>
-    <td class="num">${w > 0 ? w.toLocaleString("ar-EG") + " غ" : "—"}</td>
-    <td class="num"><b>${(Number(it.quantity) || 0).toLocaleString("ar-EG")} غ</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${storageQtyText(it, out)}</div>` : ""}</td>
-    <td class="num"><b>${fmtPieces(storagePiecesOf(it))}</b></td>
-    <td>${it.color ? esc(it.color) : "—"}</td>
+    ${jarrarCols(it.category).map((col) => col.c(it)).join("")}
     <td>${it.note ? esc(it.note) : "—"}</td>
     <td>${fmtDateTime(it.date)}</td>
     ${storageRowActions(it)}
@@ -2119,13 +2153,14 @@ function storageCatRow(it) {
 }
 function storageCatBodyHtml(cat) {
   const rows = storageCatFilteredRows(cat);
-  const cols = (isJarrarCat(cat) ? 8 : (storageSubsOf(cat).length ? 4 : 3)) + (canEditStorage() ? 1 : 0);
+  const cols = (isJarrarCat(cat) ? jarrarCols(cat).length + 2 : (storageSubsOf(cat).length ? 4 : 3)) + (canEditStorage() ? 1 : 0);
   return rows.length ? rows.map((it) => storageCatRow(it)).join("") : `<tr><td colspan="${cols}" class="empty-msg">لا أصناف.</td></tr>`;
 }
 function storageCatInfoHtml(cat) {
   const rows = storageCatFilteredRows(cat);
   const totalQty = rows.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
   if (isJarrarCat(cat)) {
+    if (!canDeleteStorage()) return ""; // الإجماليات للمدير (loai) فقط
     const pcs = rows.reduce((s, it) => { const p = storagePiecesOf(it); return s + (p === null ? 0 : p); }, 0);
     return `<b>${rows.length.toLocaleString("ar-EG")}</b> صنف — إجمالي الوزن <b>${totalQty.toLocaleString("ar-EG")} غ</b> — إجمالي الجرارات <b>${fmtPieces(pcs)}</b>.`;
   }
@@ -2146,8 +2181,10 @@ function storageCategoryHtml(cat) {
   const subBtns = hasSubs ? [`<button class="chip${storageSubFilter === "" ? " active" : ""}" onclick="storageSetSub('')">الكل</button>`]
     .concat(subs.map((s) => `<button class="chip${storageSubFilter === s ? " active" : ""}" onclick="storageSetSub('${s}')">${esc(s)}</button>`)).join("") : "";
   const addBtns = canEditStorage()
-    ? (isJarrarCat(cat)
+    ? (isJarrarCat(cat) && !hasSubs
         ? `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '')">+ إضافة صنف</button>`
+        : isJarrarCat(cat)
+        ? subs.map((s) => `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '${s}')">+ إضافة ${esc(s)}</button>`).join(" ")
         : hasSubs
         ? subs.map((s) => `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '${s}')">+ ${esc(cat)} ${esc(s)}</button>`).join(" ")
         : `<button class="btn btn-primary btn-sm" onclick="storageAddForm('${cat}', '')">+ ${esc(cat)}</button>`)
@@ -2162,7 +2199,7 @@ function storageCategoryHtml(cat) {
     <p class="info-line" id="storage-cat-info">${storageCatInfoHtml(cat)}</p>
     <div class="table-wrap"><table class="data zebra">
       <thead><tr>${isJarrarCat(cat)
-        ? "<th>الصورة</th><th>الكود</th><th>وزن الجرار</th><th>الكمية (غرام)</th><th>عدد الجرارات</th><th>اللون</th>"
+        ? jarrarCols(cat).map((col) => `<th>${col.h}</th>`).join("")
         : (hasSubs ? "<th>المقاس (mm)</th>" : "") + "<th>المواصفات</th><th>الكمية</th>"}<th>الملاحظة</th><th>التوقيت</th>${canEditStorage() ? "<th>إجراءات</th>" : ""}</tr></thead>
       <tbody id="storage-cat-body">${storageCatBodyHtml(cat)}</tbody>
     </table></div>`;
@@ -2471,9 +2508,8 @@ function storageSpecFieldsHtml(cat) {
       const onCh = controllers.has(sp.key) ? ` onchange="storageFormCond('${cat}')"` : "";
       return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><select id="st-${sp.key}"${onCh}>${opts}</select></div>`;
     }
-    const inType = sp.type === "number" ? "number" : "text";
-    const minAttr = sp.type === "number" ? ' min="0" inputmode="decimal" oninput="this.value=this.value.replace(/[^0-9.]/g,\'\')"' : "";
-    return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><input type="${inType}"${minAttr} id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
+    const decAttr = sp.type === "number" ? ' inputmode="decimal" autocomplete="off" oninput="normDecimalInput(this)"' : "";
+    return `<div class="field" id="stf-${sp.key}"${hidden}><label>${lbl}</label><input type="text"${decAttr} id="st-${sp.key}" placeholder="${esc(sp.label)}" /></div>`;
   }).join("");
 }
 /* قراءة المواصفات من النموذج والتحقّق منها — يرجع كائن القيم أو null عند خطأ */
@@ -2492,17 +2528,17 @@ function storageAddForm(cat, sub) {
   if (!canEditStorage()) return;
   if (isJarrarCat(cat)) {
     storageNewImage = ""; storageImgBusy = false;
-    openModal(`${cat} — إضافة صنف`, `
-    <p class="info-line">الكود: <b>${storageNextCode(cat)}</b> <span class="qty-sub">(يُعطى تلقائياً عند الحفظ)</span></p>
+    openModal(`${sub ? cat + " " + sub : cat} — إضافة صنف`, `
+    <p class="info-line">الكود: <b>${storageNextCode(cat)}</b> <span class="qty-sub">(يُعطى تلقائياً عند الحفظ)</span>${sub ? ` • المقاس: <b>${esc(sub)}</b>` : ""}</p>
     <div class="form-grid">
       <div class="field field-full"><label>الصورة</label><input type="file" id="st-img" accept="image/*" onchange="storagePickImage(this)" /><div id="st-img-prev" class="st-img-prev"></div></div>
       ${storageSpecFieldsHtml(cat)}
-      <div class="field"><label>الكمية (غرام)</label><input type="number" id="st-qty" min="0" placeholder="0" inputmode="decimal" oninput="this.value=this.value.replace(/[^0-9.]/g,'');storageJarPreview()" /></div>
+      <div class="field"><label>الكمية (غرام)</label><input type="text" id="st-qty" placeholder="0" inputmode="decimal" autocomplete="off" oninput="normDecimalInput(this);storageJarPreview()" /></div>
       <div class="field field-full"><p class="info-line" id="st-pcs-prev" style="margin:0"></p></div>
       <div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة..."></textarea></div>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-success" onclick="storageSaveNew('${cat}', '')">حفظ الصنف</button>
+      <button class="btn btn-success" onclick="storageSaveNew('${cat}', '${sub}')">حفظ الصنف</button>
       <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
     </div>`);
     const wIn = $("#st-unitWeight");
@@ -2541,9 +2577,10 @@ async function storageSaveNew(cat, sub) {
   const jar = isJarrarCat(cat);
   if (jar) {
     if (storageImgBusy) { toast("انتظر حتى تجهز الصورة", true); return; }
+    if (!storageNewImage) { toast("الصورة إلزامية", true); return; }
     const w = Number(obj.unitWeight);
-    if (!(w > 0)) { toast("وزن الجرار يجب أن يكون أكبر من صفر", true); return; }
-    obj.unitWeight = w; obj.image = storageNewImage || ""; obj.code = storageNextCode(cat);
+    if (!(w > 0)) { toast("الوزن يجب أن يكون أكبر من صفر", true); return; }
+    obj.unitWeight = round3(w); obj.quantity = round3(obj.quantity); obj.image = storageNewImage; obj.code = storageNextCode(cat);
   }
   try {
     let rec;
@@ -2560,6 +2597,78 @@ async function storageSaveNew(cat, sub) {
     closeModal(); toast(jar ? "تمت إضافة الصنف — الكود " + obj.code : "تمت إضافة الصنف"); renderStorage();
   } catch (e) { toast(errMsg(e, "تعذّر حفظ الصنف"), true); }
 }
+/* ---------- تعديل صنف (للمدير loai فقط) — يُسجَّل في السجل ما الذي تغيّر ---------- */
+function storageEditForm(id) {
+  if (!canDeleteStorage()) return;
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const cat = it.category, jar = isJarrarCat(cat), subs = storageSubsOf(cat);
+  storageNewImage = ""; storageImgBusy = false;
+  const subSel = subs.length
+    ? `<div class="field"><label>المقاس</label><select id="st-sub"><option value="">—</option>${subs.map((x) => `<option value="${esc(x)}"${it.sub === x ? " selected" : ""}>${esc(x)}</option>`).join("")}</select></div>`
+    : "";
+  openModal(`تعديل — ${it.code ? it.code + " " : ""}${cat}${it.sub ? " " + it.sub : ""}`, `
+    <div class="form-grid">
+      ${jar ? `<div class="field field-full"><label>الصورة${storageValidImage(it.image) ? " (اختر صورة جديدة لتغييرها)" : ""}</label>
+        ${storageValidImage(it.image) ? `<div class="st-img-prev"><img src="${esc(it.image)}" alt="" /></div>` : ""}
+        <input type="file" id="st-img" accept="image/*" onchange="storagePickImage(this)" /><div id="st-img-prev" class="st-img-prev"></div></div>` : ""}
+      ${subSel}
+      ${storageSpecFieldsHtml(cat)}
+      <div class="field"><label>الكمية${jar ? " (غرام)" : ""}</label><input type="text" id="st-qty" inputmode="decimal" autocomplete="off" value="${esc(String(Number(it.quantity) || 0))}" oninput="normDecimalInput(this)${jar ? ";storageJarPreview()" : ""}" /></div>
+      ${jar ? '<div class="field field-full"><p class="info-line" id="st-pcs-prev" style="margin:0"></p></div>' : ""}
+      <div class="field field-full"><label>ملاحظة (اختياري)</label><textarea id="st-note" placeholder="ملاحظة...">${esc(it.note || "")}</textarea></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-success" onclick="storageSaveEdit(${id})">حفظ التعديل</button>
+      <button class="btn btn-outline" onclick="closeModal()">إلغاء</button>
+    </div>`);
+  storageSpecsOf(cat).forEach((sp) => {
+    const el = $("#st-" + sp.key);
+    if (el) el.value = it[sp.key] === undefined || it[sp.key] === null ? "" : String(it[sp.key]);
+  });
+  storageFormCond(cat);
+  if (jar) { const wIn = $("#st-unitWeight"); if (wIn) wIn.addEventListener("input", storageJarPreview); storageJarPreview(); }
+}
+async function storageSaveEdit(id) {
+  if (!canDeleteStorage()) return;
+  const it = storageItems().find((x) => x.id === id);
+  if (!it) return;
+  const cat = it.category, jar = isJarrarCat(cat);
+  const obj = storageCollectSpecs(cat);
+  if (obj === null) return;
+  const subEl = $("#st-sub");
+  const sub = subEl ? subEl.value : (it.sub || "");
+  if (subEl && !sub) { toast("اختر المقاس", true); return; }
+  const qRaw = ($("#st-qty") ? $("#st-qty").value : "").trim();
+  if (qRaw === "" || !isFinite(Number(qRaw))) { toast("الكمية إلزامية", true); return; }
+  const patch = Object.assign({}, obj, { sub: sub, quantity: round3(Number(qRaw)), note: ($("#st-note") ? $("#st-note").value : "").trim() });
+  if (jar) {
+    if (storageImgBusy) { toast("انتظر حتى تجهز الصورة", true); return; }
+    const w = Number(patch.unitWeight);
+    if (!(w > 0)) { toast("الوزن يجب أن يكون أكبر من صفر", true); return; }
+    patch.unitWeight = round3(w);
+    if (storageNewImage) patch.image = storageNewImage;
+    else if (!storageValidImage(it.image)) { toast("الصورة إلزامية", true); return; }
+  }
+  // ملخّص التغييرات للسجل
+  const labels = { sub: "المقاس", quantity: "الكمية", note: "الملاحظة" };
+  storageSpecsOf(cat).forEach((sp) => { labels[sp.key] = sp.label; });
+  const changes = [];
+  Object.keys(patch).forEach((k) => {
+    if (k === "image") { changes.push("الصورة"); return; }
+    const a = it[k] === undefined || it[k] === null ? "" : String(it[k]);
+    const b = String(patch[k]);
+    if (a !== b) changes.push(`${labels[k] || k}: ${a || "—"} ← ${b || "—"}`);
+  });
+  if (!changes.length) { closeModal(); toast("لا توجد تغييرات"); return; }
+  try {
+    await Store.updateStorageItem(id, patch);
+    const now = storageItems().find((x) => x.id === id) || Object.assign({}, it, patch);
+    await logStore(id, cat, sub, "item_edited", 0, "تعديل — " + changes.join("، "), storageSpecCells(now));
+    storageNewImage = "";
+    closeModal(); toast("تم حفظ التعديل"); renderStorage();
+  } catch (e) { toast(errMsg(e, "تعذّر حفظ التعديل"), true); }
+}
 function storageQtyForm(id, mode) {
   if (!canEditStorage()) return;
   const it = storageItems().find((x) => x.id === id);
@@ -2569,7 +2678,7 @@ function storageQtyForm(id, mode) {
   const w = Number(it.unitWeight) || 0;
   openModal(`${isAdd ? "إضافة كمية" : "سحب كمية"} — ${it.code ? it.code + " " : ""}${it.category} ${it.sub}`, `
     <p class="info-line">الكمية الحالية: <b>${storageQtyText(it)}</b></p>
-    <div class="field"><label>${isAdd ? "الكمية المضافة" : "الكمية المسحوبة"}${jar ? " (غرام)" : ""}</label><input type="number" id="st-adj" min="1" placeholder="0"${jar ? ` inputmode="decimal" oninput="storagePcsHint(this, ${w}, 'st-adj-pcs')"` : ""} />${jar ? '<div class="qty-sub" id="st-adj-pcs"></div>' : ""}</div>
+    <div class="field"><label>${isAdd ? "الكمية المضافة" : "الكمية المسحوبة"}${jar ? " (غرام)" : ""}</label><input type="${jar ? "text" : "number"}" id="st-adj" min="1" placeholder="0"${jar ? ` inputmode="decimal" autocomplete="off" oninput="normDecimalInput(this);storagePcsHint(this, ${w}, 'st-adj-pcs')"` : ""} />${jar ? '<div class="qty-sub" id="st-adj-pcs"></div>' : ""}</div>
     <div class="field field-full"><label>ملاحظة (إلزامي)</label><textarea id="st-adj-note" placeholder="${isAdd ? "سبب الإضافة..." : "سبب السحب..."}"></textarea></div>
     <div class="modal-actions">
       <button class="btn ${isAdd ? "btn-success" : "btn-warning"}" onclick="storageApplyQty(${id}, '${mode}')">${isAdd ? "إضافة" : "سحب"}</button>
@@ -2583,7 +2692,7 @@ async function storageApplyQty(id, mode) {
   if (!amt) { toast("أدخل كمية صحيحة", true); return; }
   const note = ($("#st-adj-note") ? $("#st-adj-note").value : "").trim();
   if (!note) { toast(mode === "add" ? "يرجى كتابة ملاحظة سبب الإضافة" : "يرجى كتابة ملاحظة سبب السحب", true); return; }
-  const newQty = mode === "add" ? it.quantity + amt : it.quantity - amt;
+  const newQty = round3(mode === "add" ? it.quantity + amt : it.quantity - amt);
   if (newQty < 0) { toast("الكمية المسحوبة أكبر من المتوفّر (" + storageQtyText(it) + ")", true); return; }
   try {
     await Store.updateStorageItem(id, { quantity: newQty });
@@ -2595,7 +2704,7 @@ async function storageApplyQty(id, mode) {
 function storageTempForm(id) {
   if (!canEditStorage()) return;
   const it = storageItems().find((x) => x.id === id);
-  if (!it) return;
+  if (!it || isJarrarCat(it.category)) return; // لا سحب مؤقت في الجرار
   const jar = isJarrarCat(it.category);
   openModal(`سحب مؤقت — ${it.code ? it.code + " " : ""}${it.category} ${it.sub}`, `
     <p class="info-line">المتوفّر حالياً: <b>${storageQtyText(it)}</b></p>

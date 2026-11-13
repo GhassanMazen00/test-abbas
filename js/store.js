@@ -249,9 +249,14 @@ const Store = (function () {
       if (patch.size !== undefined) row.size = patch.size;
       if (patch.jarrarShape !== undefined) row.jarrar_shape = patch.jarrarShape;
       if (patch.note !== undefined) row.note = patch.note;
+      if (patch.sub !== undefined) row.sub = patch.sub;
+      if (patch.openType !== undefined) row.open_type = patch.openType;
+      if (patch.colorNum !== undefined) row.color_num = patch.colorNum;
+      if (patch.unitWeight !== undefined) row.unit_weight = Number(patch.unitWeight) || 0;
+      if (patch.image !== undefined) row.image = patch.image;
       if (useSupabase) { const { error } = await sb.from("storage_items").update(row).eq("id", id); if (error) throw error; }
       const rec = (DB.storage || []).find((x) => x.id === id);
-      if (rec) { Object.keys(patch).forEach((k) => { if (patch[k] !== undefined) rec[k] = (k === "quantity" ? (Number(patch[k]) || 0) : patch[k]); }); }
+      if (rec) { Object.keys(patch).forEach((k) => { if (patch[k] !== undefined) rec[k] = ((k === "quantity" || k === "unitWeight") ? (Number(patch[k]) || 0) : patch[k]); }); }
       if (!useSupabase) saveDB(DB);
     },
     async deleteStorageItem(id) {
