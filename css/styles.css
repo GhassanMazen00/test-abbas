@@ -715,3 +715,9 @@ table.data.st-table th, table.data.st-table td { white-space: nowrap; padding: 1
 table.data.st-table td.cell-wrap { white-space: normal; min-width: 170px; max-width: 340px; }
 table.data.st-table .row-actions .btn { margin-inline-start: 4px; }
 @media (max-width: 1400px) { .container { padding-left: 16px; padding-right: 16px; } }
+
+/* حالة التحقق (CAPTCHA) تحت المربع */
+.captcha-status { margin: 6px 0 0; font-size: 13px; color: var(--muted); text-align: center; line-height: 1.7; }
+.captcha-status:empty { display: none; }
+.captcha-status.err { color: var(--danger); font-weight: 600; }
+.captcha-status .btn { margin-top: 6px; }
