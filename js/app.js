@@ -2079,7 +2079,7 @@ function storageSearchRow(it) {
     <td class="num">${esc(it.sub) || "—"}</td>
     <td>${storageSpecCells(it)}</td>
     <td class="num">${storageQtyText(it)}</td>
-    <td>${it.note ? esc(it.note) : "—"}</td>
+    <td class="cell-wrap">${it.note ? esc(it.note) : "—"}</td>
     <td>${fmtDateTime(it.date)}</td>
   </tr>`;
 }
@@ -2088,7 +2088,7 @@ function storageHomeResultsHtml() {
   if (!q) return "";
   const rows = storageItems().filter((it) => storageMatch(it, q)).sort((a, b) => new Date(b.date) - new Date(a.date));
   return `<p class="info-line"><b>${rows.length.toLocaleString("ar-EG")}</b> نتيجة للبحث «${esc(q)}».</p>
-    <div class="table-wrap"><table class="data zebra">
+    <div class="table-wrap"><table class="data zebra st-table">
       <thead><tr><th>التصنيف</th><th>المقاس</th><th>المواصفات</th><th>الكمية</th><th>الملاحظة</th><th>التاريخ</th></tr></thead>
       <tbody>${rows.length ? rows.map(storageSearchRow).join("") : '<tr><td colspan="6" class="empty-msg">لا نتائج مطابقة.</td></tr>'}</tbody>
     </table></div>`;
@@ -2136,7 +2136,7 @@ function storageCatRow(it) {
   if (isJarrarCat(it.category)) {
     return `<tr>
     ${jarrarCols(it.category).map((col) => col.c(it)).join("")}
-    <td>${it.note ? esc(it.note) : "—"}</td>
+    <td class="cell-wrap">${it.note ? esc(it.note) : "—"}</td>
     <td>${fmtDateTime(it.date)}</td>
     ${storageRowActions(it)}
   </tr>`;
@@ -2146,7 +2146,7 @@ function storageCatRow(it) {
     ${hasSubs ? `<td class="num">${esc(it.sub) || "—"}</td>` : ""}
     <td>${storageSpecCells(it)}</td>
     <td class="num"><b>${Number(it.quantity).toLocaleString("ar-EG")}</b>${out > 0 ? `<div class="qty-sub">مؤقت خارج: ${out.toLocaleString("ar-EG")}</div>` : ""}</td>
-    <td>${it.note ? esc(it.note) : "—"}</td>
+    <td class="cell-wrap">${it.note ? esc(it.note) : "—"}</td>
     <td>${fmtDateTime(it.date)}</td>
     ${storageRowActions(it)}
   </tr>`;
@@ -2197,7 +2197,7 @@ function storageCategoryHtml(cat) {
     <div class="search-bar"><input type="text" id="storage-cat-search" placeholder="ابحث داخل ${esc(cat)} (${isJarrarCat(cat) ? "كود، لون، وزن، ملاحظة" : "لون، مقاس، ملاحظة"}...)" value="${esc(storageCatQuery)}" /></div>
     ${hasSubs ? `<div class="chips-row">${subBtns}</div>` : ""}
     <p class="info-line" id="storage-cat-info">${storageCatInfoHtml(cat)}</p>
-    <div class="table-wrap"><table class="data zebra">
+    <div class="table-wrap"><table class="data zebra st-table">
       <thead><tr>${isJarrarCat(cat)
         ? jarrarCols(cat).map((col) => `<th>${col.h}</th>`).join("")
         : (hasSubs ? "<th>المقاس (mm)</th>" : "") + "<th>المواصفات</th><th>الكمية</th>"}<th>الملاحظة</th><th>التوقيت</th>${canEditStorage() ? "<th>إجراءات</th>" : ""}</tr></thead>
@@ -2265,7 +2265,7 @@ function storageTempsTabHtml() {
       <td class="num"><b>${it ? storageQtyText(it, outstanding) : outstanding.toLocaleString("ar-EG")}</b></td>
       <td class="num">${it ? storageQtyText(it, w.amount) : w.amount.toLocaleString("ar-EG")}</td>
       <td class="num">${it ? storageQtyText(it, w.returned) : w.returned.toLocaleString("ar-EG")}</td>
-      <td>${w.reason ? esc(w.reason) : "—"}</td>
+      <td class="cell-wrap">${w.reason ? esc(w.reason) : "—"}</td>
       <td>${fmtDateTime(w.date)}</td>
       ${canEditStorage() ? `<td class="row-actions">
         <button class="btn btn-success btn-sm" onclick="storageReturnForm(${w.id})">إرجاع</button>
@@ -2274,7 +2274,7 @@ function storageTempsTabHtml() {
     </tr>`;
   }).join("");
   return `<p class="info-line">إجمالي المسحوب مؤقتاً: <b>${total.toLocaleString("ar-EG")}</b> — <b>${list.length.toLocaleString("ar-EG")}</b> سحبة قائمة.</p>
-    <div class="table-wrap"><table class="data zebra">
+    <div class="table-wrap"><table class="data zebra st-table">
       <thead><tr><th>الصنف</th><th>خارج الآن</th><th>مسحوب</th><th>مُرجع</th><th>السبب</th><th>التوقيت (القاهرة)</th>${canEditStorage() ? "<th>إرجاع</th>" : ""}</tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -2432,7 +2432,7 @@ function storageHistRows() {
     <td>${storageEventBadge(e.type)}</td>
     <td>${esc(e.category)}${e.sub ? " " + esc(e.sub) : ""}${e.specs ? " — " + esc(e.specs) : ""}</td>
     <td class="num">${e.amount ? e.amount.toLocaleString("ar-EG") + (isJarrarCat(e.category) ? " غ" : "") : "—"}</td>
-    <td>${e.reason ? esc(e.reason) : "—"}</td>
+    <td class="cell-wrap">${e.reason ? esc(e.reason) : "—"}</td>
     <td>${e.actor ? esc(e.actor) : "—"}</td>
     ${canDeleteStorage() ? `<td class="row-actions"><button class="btn btn-danger btn-sm" onclick="storageDeleteEvent(${e.id})">حذف</button></td>` : ""}
   </tr>`).join("") : `<tr><td colspan="${canDeleteStorage() ? 7 : 6}" class="empty-msg">لا أحداث مطابقة.</td></tr>`;
@@ -2455,7 +2455,7 @@ function storageHistoryHtml() {
       <label>الإجراء <select id="sh-type" onchange="storageHistChanged()">${typeOpts}</select></label>
     </div>
     <p class="info-line"><b id="storage-hist-count">${storageEventsFiltered().length.toLocaleString("ar-EG")}</b> حدث.</p>
-    <div class="table-wrap"><table class="data zebra">
+    <div class="table-wrap"><table class="data zebra st-table">
       <thead><tr><th>التوقيت (القاهرة)</th><th>الإجراء</th><th>الصنف</th><th>الكمية</th><th>التفاصيل</th><th>المستخدم</th>${canDeleteStorage() ? "<th></th>" : ""}</tr></thead>
       <tbody id="storage-hist-body">${storageHistRows()}</tbody>
     </table></div>`;

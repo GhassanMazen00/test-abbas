@@ -236,7 +236,7 @@ button { font-family: inherit; cursor: pointer; }
 }
 
 /* ===================== التخطيط العام ===================== */
-.container { max-width: 1120px; margin: 0 auto; padding: 34px 24px; }
+.container { max-width: 1600px; margin: 0 auto; padding: 34px 24px; }
 .page-title { font-size: 24px; margin-bottom: 22px; font-weight: 700; }
 
 /* ===================== البحث ===================== */
@@ -709,3 +709,9 @@ table.bill-items input:focus { outline: 2px solid var(--primary); }
 .st-thumb { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; display: inline-block; vertical-align: middle; background: var(--surface); }
 .st-thumb-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--muted); cursor: default; }
 .st-img-prev img { margin-top: 8px; max-width: 160px; max-height: 160px; border-radius: 10px; border: 1px solid var(--border); object-fit: cover; }
+
+/* ===== جداول المخزن: كل خلية بسطر واحد (لا تكدّس للكلام)، والملاحظة فقط تلتف إن طالت ===== */
+table.data.st-table th, table.data.st-table td { white-space: nowrap; padding: 11px 9px; }
+table.data.st-table td.cell-wrap { white-space: normal; min-width: 170px; max-width: 340px; }
+table.data.st-table .row-actions .btn { margin-inline-start: 4px; }
+@media (max-width: 1400px) { .container { padding-left: 16px; padding-right: 16px; } }
