@@ -380,7 +380,7 @@ function captchaErrHint(code) {
   const c = String(code || "");
   if (c.indexOf("1102") === 0) return "هذا الدومين غير مضاف في إعدادات Cloudflare Turnstile (Hostname Management).";
   if (c.indexOf("1101") === 0 || c === "400020") return "مفتاح الموقع (Site Key) غير صحيح.";
-  if (c.indexOf("300") === 0 || c.indexOf("600") === 0) return "فشل التحقق من المتصفح — أعد المحاولة، أو جرّب متصفحاً آخر.";
+  if (c.indexOf("300") === 0 || c.indexOf("600") === 0) return "فشل التحقق داخل المتصفح (ليس من إعدادات الموقع) — أعد المحاولة. إن تكرّر: أوقف VPN/مانع الإعلانات، وفي Safari أوقف «Hide IP Address»، أو جرّب متصفحاً/جهازاً آخر.";
   if (c.indexOf("200") === 0) return "مشكلة في الكاش/الوقت على الجهاز — حدّث الصفحة.";
   return "";
 }
@@ -418,7 +418,6 @@ function initCaptcha() {
           _captchaToken = null;
           const hint = captchaErrHint(code);
           captchaStatus("خطأ في التحقق" + (code ? " (رمز: " + esc(String(code)) + ")" : "") + ". " + esc(hint) + CAPTCHA_RETRY_BTN, true);
-          return true;
         },
         "unsupported-callback": () => { captchaStatus("هذا المتصفح غير مدعوم للتحقق — حدّث المتصفح أو جرّب Chrome." , true); }
       });
