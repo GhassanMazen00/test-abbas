@@ -367,27 +367,76 @@ async function finishLogin() {
 const CAPTCHA_SITE_KEY = (window.APP_CONFIG && window.APP_CONFIG.CAPTCHA_SITE_KEY) || "";
 let _captchaToken = null, _captchaWidgetId = null;
 function captchaEnabled() { return !!CAPTCHA_SITE_KEY; }
+/* رسالة حالة تحت مربع التحقق — حتى لا يبقى المربع فارغاً بصمت عند أي مشكلة */
+function captchaStatus(html, isErr) {
+  const el = $("#captcha-status");
+  if (!el) return;
+  el.innerHTML = html || "";
+  el.classList.toggle("err", !!isErr);
+}
+const CAPTCHA_RETRY_BTN = ' <button type="button" class="btn btn-outline btn-sm" onclick="retryCaptcha()">إعادة المحاولة</button>';
+/* شرح رموز أخطاء Turnstile الشائعة */
+function captchaErrHint(code) {
+  const c = String(code || "");
+  if (c.indexOf("1102") === 0) return "هذا الدومين غير مضاف في إعدادات Cloudflare Turnstile (Hostname Management).";
+  if (c.indexOf("1101") === 0 || c === "400020") return "مفتاح الموقع (Site Key) غير صحيح.";
+  if (c.indexOf("300") === 0 || c.indexOf("600") === 0) return "فشل التحقق من المتصفح — أعد المحاولة، أو جرّب متصفحاً آخر.";
+  if (c.indexOf("200") === 0) return "مشكلة في الكاش/الوقت على الجهاز — حدّث الصفحة.";
+  return "";
+}
+let _captchaLoadTimer = null;
 function initCaptcha() {
   if (!captchaEnabled()) return; // مُعطّل: لا يظهر شيء ولا يتغيّر سلوك الدخول
+  captchaStatus("جارٍ تحميل التحقق...", false);
+  let failed = false;
+  const fail = (why) => {
+    if (failed || _captchaWidgetId !== null) return;
+    failed = true;
+    captchaStatus("تعذّر تحميل التحقق (CAPTCHA) من Cloudflare. " + why + CAPTCHA_RETRY_BTN, true);
+  };
   if (!document.getElementById("cf-turnstile-script")) {
     const s = document.createElement("script");
     s.id = "cf-turnstile-script";
     s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js";
     s.async = true; s.defer = true;
+    s.onerror = () => fail("الاتصال بـ challenges.cloudflare.com محجوب (مانع إعلانات / شبكة / VPN).");
     document.head.appendChild(s);
   }
+  clearTimeout(_captchaLoadTimer);
+  _captchaLoadTimer = setTimeout(() => fail("انتهت مهلة التحميل — تحقّق من الإنترنت أو أوقف مانع الإعلانات."), 15000);
   (function render() {
+    if (failed) return;
     if (!(window.turnstile && $("#captcha-box"))) { setTimeout(render, 200); return; }
+    clearTimeout(_captchaLoadTimer);
     if (_captchaWidgetId !== null) return;
     try {
       _captchaWidgetId = window.turnstile.render("#captcha-box", {
         sitekey: CAPTCHA_SITE_KEY,
-        callback: (t) => { _captchaToken = t; },
-        "expired-callback": () => { _captchaToken = null; },
-        "error-callback": () => { _captchaToken = null; }
+        callback: (t) => { _captchaToken = t; captchaStatus("", false); },
+        "expired-callback": () => { _captchaToken = null; captchaStatus("انتهت صلاحية التحقق — أعد التحقق.", false); },
+        "error-callback": (code) => {
+          _captchaToken = null;
+          const hint = captchaErrHint(code);
+          captchaStatus("خطأ في التحقق" + (code ? " (رمز: " + esc(String(code)) + ")" : "") + ". " + esc(hint) + CAPTCHA_RETRY_BTN, true);
+          return true;
+        },
+        "unsupported-callback": () => { captchaStatus("هذا المتصفح غير مدعوم للتحقق — حدّث المتصفح أو جرّب Chrome." , true); }
       });
-    } catch (e) {}
+      if (_captchaWidgetId === null || _captchaWidgetId === undefined) { _captchaWidgetId = null; fail("تعذّر إنشاء مربع التحقق."); return; }
+      captchaStatus("", false);
+    } catch (e) { _captchaWidgetId = null; fail(esc((e && e.message) || "")); }
   })();
+}
+function retryCaptcha() {
+  _captchaToken = null;
+  if (window.turnstile && _captchaWidgetId !== null) {
+    try { window.turnstile.reset(_captchaWidgetId); captchaStatus("", false); return; } catch (e) {}
+  }
+  if (window.turnstile && _captchaWidgetId !== null) { try { window.turnstile.remove(_captchaWidgetId); } catch (e) {} }
+  _captchaWidgetId = null;
+  const box = $("#captcha-box"); if (box) box.innerHTML = "";
+  if (!window.turnstile) { const old = document.getElementById("cf-turnstile-script"); if (old) old.remove(); }
+  initCaptcha();
 }
 function resetCaptcha() {
   _captchaToken = null;
@@ -403,7 +452,7 @@ $("#login-form").addEventListener("submit", async (e) => {
   const p = $("#password").value;
   const btn = $("#login-form button[type=submit]");
   if (!u || !p) { $("#login-error").textContent = "الرجاء إدخال اسم المستخدم وكلمة المرور"; return; }
-  if (captchaEnabled() && !_captchaToken) { $("#login-error").textContent = "الرجاء إكمال التحقق (CAPTCHA) قبل الدخول"; return; }
+  if (captchaEnabled() && !_captchaToken) { $("#login-error").textContent = $("#captcha-status") && $("#captcha-status").classList.contains("err") ? "التحقق (CAPTCHA) لم يعمل — انظر الرسالة أعلاه" : "الرجاء إكمال التحقق (CAPTCHA) قبل الدخول"; return; }
   $("#login-error").textContent = "";
   btn.disabled = true;
   const label = btn.textContent; btn.textContent = "جارٍ الدخول...";
